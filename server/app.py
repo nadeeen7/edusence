@@ -9,6 +9,7 @@ import hashlib
 import secrets
 import csv
 import io
+import traceback
 
 app = Flask(__name__)
 # Use a stable secret key to keep sessions valid across server restarts
@@ -27,8 +28,9 @@ classroom_sessions = {}
 # Track disconnection timers for grace period: student_id -> Timer object
 disconnection_timers = {}
 
-# Database configuration
-DATABASE = 'classroom.db'
+# Database configuration - using absolute path to avoid ambiguity
+BASE_DIR = os.path.absPath(os.path.dirname(__file__))
+DATABASE = os.path.join(BASE_DIR, 'classroom.db')
 
 def get_db():
     """Create database connection"""
@@ -97,6 +99,29 @@ def init_db():
     # Create alerts table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            student_id TEXT NOT NULL,
+            alert_type TEXT NOT NULL,
+            alert_message TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES monitoring_sessions(id),
+            FOREIGN KEY (student_id) REFERENCES students(id)
+        )
+    ''')
+
+    # Schema Migration: Add room_code to monitoring_sessions if missing
+    try:
+        cursor.execute("PRAGMA table_info(monitoring_sessions)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'room_code' not in columns:
+            print("MIGRATION: Adding room_code column to monitoring_sessions")
+            cursor.execute("ALTER TABLE monitoring_sessions ADD COLUMN room_code TEXT")
+    except Exception as e:
+        print(f"Migration error: {e}")
+    
+    conn.commit()
+    conn.close()
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id INTEGER NOT NULL,
             student_id TEXT NOT NULL,
@@ -491,6 +516,8 @@ def get_students():
         return jsonify({'success': True, 'students': students})
         
     except Exception as e:
+        print("ERROR in get_students:")
+        traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/get_student_stats/<student_id>', methods=['GET'])
@@ -1193,11 +1220,11 @@ if __name__ == '__main__':
     use_ssl = os.path.exists('key.pem') and os.path.exists('cert.pem')
     protocol = "https" if use_ssl else "http"
     print(f"\n--- SERVER STARTING ---")
-    print(f"Access link: {protocol}://localhost:5000")
+    print(f"Access link: {protocol}://localhost:5001")
     print(f"-----------------------\n")
 
     if use_ssl:
-        socketio.run(app, debug=True, host='0.0.0.0', port=5000, keyfile='key.pem', certfile='cert.pem')
+        socketio.run(app, debug=True, host='0.0.0.0', port=5001, keyfile='key.pem', certfile='cert.pem')
     else:
-        socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+        socketio.run(app, debug=True, host='0.0.0.0', port=5001)
 
