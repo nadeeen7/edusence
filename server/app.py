@@ -29,7 +29,7 @@ classroom_sessions = {}
 disconnection_timers = {}
 
 # Database configuration - using absolute path to avoid ambiguity
-BASE_DIR = os.path.absPath(os.path.dirname(__file__))
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DATABASE = os.path.join(BASE_DIR, 'classroom.db')
 
 def get_db():
@@ -119,19 +119,6 @@ def init_db():
             cursor.execute("ALTER TABLE monitoring_sessions ADD COLUMN room_code TEXT")
     except Exception as e:
         print(f"Migration error: {e}")
-    
-    conn.commit()
-    conn.close()
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id INTEGER NOT NULL,
-            student_id TEXT NOT NULL,
-            alert_type TEXT NOT NULL,
-            alert_message TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (session_id) REFERENCES monitoring_sessions(id),
-            FOREIGN KEY (student_id) REFERENCES students(id)
-        )
-    ''')
     
     # Create meeting_links table
     cursor.execute('''
@@ -731,6 +718,22 @@ def handle_join_class(data):
     
     join_room(room)
     
+    # Initialize database session (Persistence)
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        # Look for existing active session
+        cursor.execute("SELECT id FROM monitoring_sessions WHERE student_id = ? AND room_code = ? AND end_time IS NULL", (student_id, room))
+        session_row = cursor.fetchone()
+        
+        if not session_row:
+            print(f"DEBUG: Creating new DB session for {student_id} in {room}")
+            cursor.execute("INSERT INTO monitoring_sessions (student_id, room_code) VALUES (?, ?)", (student_id, room))
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"DEBUG ERROR: Failed to create DB session: {e}")
+
     # Track connection
     connected_students[request.sid] = {
         'student_id': student_id,
@@ -999,10 +1002,17 @@ def log_attention_to_db(student_id, score, room=None, alert_type=None, message=N
             ''', (student_id,))
 
         active_session = cursor.fetchone()
-        if not active_session: return
-
-        session_id = active_session['id']
-        room = room or active_session['room_code']
+        if not active_session:
+            # Fallback: Create session if missing (e.g. fast updates before join_class DB call finishes)
+            if room:
+                print(f"DEBUG: log_attention_to_db creating fallback session for {student_id}")
+                cursor.execute("INSERT INTO monitoring_sessions (student_id, room_code) VALUES (?, ?)", (student_id, room))
+                session_id = cursor.lastrowid
+            else:
+                return
+        else:
+            session_id = active_session['id']
+            room = room or active_session['room_code']
 
         if normalized_score is not None:
             cursor.execute('''

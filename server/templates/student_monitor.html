@@ -578,45 +578,49 @@
                 rawScore = 100;
                 status = "Focused";
 
-                // Eye Closure logic
-                if (avgEAR < 0.12) {
+                // Eye Closure logic (EAR: ~0.3 is open, <0.15 is closed)
+                if (avgEAR < 0.15) {
                     if (!state.eyesClosedStart) state.eyesClosedStart = now;
                     const closedDuration = now - state.eyesClosedStart;
-                    if (closedDuration > 2000) {
-                        rawScore -= 70;
+                    if (closedDuration > 1500) {
+                        rawScore -= 80;
                         status = "Sleepy";
-                    } else if (closedDuration > 500) {
-                        rawScore -= 30; // Blinking or looking down
+                    } else if (closedDuration > 300) {
+                        rawScore -= 40; // Blinking or looking down
+                        status = "Distracted (Eyes)";
                     }
                 } else {
                     state.eyesClosedStart = null;
                 }
 
                 // Head Pose logic (Yaw: looking left/right)
-                if (Math.abs(yaw) > 0.25) {
-                    rawScore -= 50;
+                const absYaw = Math.abs(yaw);
+                if (absYaw > 0.18) {
+                    const yawPenalty = absYaw > 0.4 ? 60 : 40;
+                    rawScore -= yawPenalty;
                     status = (yaw > 0) ? "Looking Right" : "Looking Left";
                 }
 
                 // Head Pose logic (Pitch: looking up/down)
                 // Ideal neutral pitch is approx 0.35-0.45 relative to eyes center
                 const normalizedPitch = pitch - 0.4;
-                if (normalizedPitch > 0.15) {
+                const absPitch = Math.abs(normalizedPitch);
+                if (normalizedPitch > 0.12) {
                     if (!state.lookingDownStart) state.lookingDownStart = now;
                     const downDuration = now - state.lookingDownStart;
-                    if (downDuration > 3000) {
-                        rawScore -= 60; // Reduce below 50%
+                    if (downDuration > 2500) {
+                        rawScore -= 70; // Significant focus loss
                         status = "Looking Down (Long)";
                     } else {
-                        rawScore -= 20;
+                        rawScore -= 30;
                         status = "Looking Down";
                     }
+                } else if (normalizedPitch < -0.12) {
+                    state.lookingDownStart = null;
+                    rawScore -= 45;
+                    status = "Looking Up";
                 } else {
                     state.lookingDownStart = null;
-                    if (normalizedPitch < -0.15) {
-                        rawScore -= 40;
-                        status = "Looking Up";
-                    }
                 }
 
                 debugInfo = {
