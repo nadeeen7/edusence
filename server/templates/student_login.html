@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Login - Edusence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-[#0D0D0D] text-white min-h-screen">
+
+    <div id="notification" class="fixed top-4 right-4 z-50 hidden max-w-sm"></div>
+
+    <nav class="bg-[#1A1A1A]/80 backdrop-blur-xl border-b border-[#333333]">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <a href="home.html"
+                class="text-xl md:text-2xl font-bold bg-gradient-to-r from-[#8A2BE2] to-[#3A7AFE] bg-clip-text text-transparent">
+                🎓 Edusence
+            </a>
+            <div class="flex gap-2">
+                <a href="home.html"
+                    class="px-3 md:px-4 py-2 text-sm md:text-base text-slate-300 hover:bg-cyan-500/10 rounded transition">Home</a>
+                <a href="register.html"
+                    class="px-3 md:px-4 py-2 text-sm md:text-base text-slate-300 hover:bg-cyan-500/10 rounded transition">Register</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-md mx-auto px-4 py-8 md:py-12">
+        <div class="bg-[#1A1A1A] border border-[#333333] rounded-xl p-6 md:p-8 shadow-2xl">
+            <h2
+                class="text-2xl md:text-3xl font-bold mb-2 text-center bg-gradient-to-r from-[#8A2BE2] to-[#3A7AFE] bg-clip-text text-transparent">
+                Student Login
+            </h2>
+            <p class="text-center text-slate-400 text-sm mb-6 md:mb-8">Access your monitoring session</p>
+
+            <form id="loginForm" class="space-y-4 md:space-y-5">
+                <div>
+                    <label class="block text-sm font-medium text-[#B3B3B3] mb-2">Email Address</label>
+                    <input type="email" id="email" placeholder="your.email@example.com"
+                        class="w-full px-4 py-2.5 bg-[#0D0D0D] border border-[#333333] rounded-lg focus:outline-none focus:border-[#8A2BE2] focus:bg-[#1A1A1A] text-white placeholder-[#666666] transition text-sm md:text-base"
+                        required />
+                    <p id="emailError" class="text-red-400 text-xs mt-1 hidden"></p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-[#B3B3B3] mb-2">Password</label>
+                    <input type="password" id="password" placeholder="Your password"
+                        class="w-full px-4 py-2.5 bg-[#0D0D0D] border border-[#333333] rounded-lg focus:outline-none focus:border-[#8A2BE2] focus:bg-[#1A1A1A] text-white placeholder-[#666666] transition text-sm md:text-base"
+                        required />
+                    <p id="passwordError" class="text-red-400 text-xs mt-1 hidden"></p>
+                </div>
+
+                <button type="submit" id="submitBtn"
+                    class="w-full py-2.5 px-6 bg-gradient-to-r from-[#8A2BE2] to-[#3A7AFE] hover:from-[#7B1FA2] hover:to-[#2962FF] rounded-lg font-bold transition text-white shadow-lg text-sm md:text-base">
+                    ✓ Login
+                </button>
+            </form>
+
+            <p class="text-center text-[#B3B3B3] mt-6 text-sm">
+                Don't have an account?
+                <a href="register.html" class="text-[#3A7AFE] hover:text-blue-400 ml-1">Register</a>
+            </p>
+        </div>
+    </main>
+
+    <script>
+        function showNotification(type, message) {
+            const notif = document.getElementById('notification');
+            const colors = {
+                success: 'bg-green-500/20 border-green-500/50 text-green-200',
+                error: 'bg-red-500/20 border-red-500/50 text-red-200'
+            };
+
+            notif.className = `fixed top-4 right-4 z-50 p-4 rounded-lg backdrop-blur-md border ${colors[type]} max-w-sm text-sm md:text-base`;
+            notif.textContent = message;
+            notif.classList.remove('hidden');
+
+            setTimeout(() => notif.classList.add('hidden'), 4000);
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+
+            // Clear previous errors
+            document.querySelectorAll('[id$="Error"]').forEach(el => el.classList.add('hidden'));
+
+            let hasError = false;
+
+            // Validation
+            if (!email.includes('@')) {
+                document.getElementById('emailError').textContent = 'Valid email required';
+                document.getElementById('emailError').classList.remove('hidden');
+                hasError = true;
+            }
+
+            if (!password) {
+                document.getElementById('passwordError').textContent = 'Password required';
+                document.getElementById('passwordError').classList.remove('hidden');
+                hasError = true;
+            }
+
+            if (hasError) {
+                showNotification('error', 'Please fill in all fields');
+                return;
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.textContent = '⏳ Logging in...';
+            submitBtn.disabled = true;
+
+            try {
+                const response = await fetch('/student_login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    localStorage.setItem('user_info', JSON.stringify(data.user));
+                    showNotification('success', 'Login successful! Welcome back!');
+
+                    setTimeout(() => {
+                        window.location.href = 'student_dashboard.html';
+                    }, 1000);
+                } else {
+                    showNotification('error', data.message || 'Incorrect email or password');
+                    submitBtn.textContent = '✓ Login';
+                    submitBtn.disabled = false;
+                }
+
+            } catch (error) {
+                console.error('Login error:', error);
+                showNotification('error', 'Network error occurred. Please try again.');
+                submitBtn.textContent = '✓ Login';
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+
+</body>
+
+</html>

@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Classroom - Edusence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"
+        defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js" defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: #000;
+            color: #fff;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+        }
+
+        .meeting-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+
+        #teacherVideo,
+        #pipVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: #111;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Video Layout Styles */
+        .main-video-wrapper {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+        }
+
+        .pip-video-wrapper {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 140px;
+            aspect-ratio: 16/9;
+            z-index: 90;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            cursor: move;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+            touch-action: none;
+        }
+
+        .pip-video-wrapper:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+
+        .pip-video-wrapper #pipVideo {
+            transform: scaleX(-1);
+            pointer-events: none;
+        }
+
+        /* Control Bar */
+        .control-bar {
+            position: fixed;
+            bottom: 32px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 12px 24px;
+            background: rgba(23, 23, 23, 0.7);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 28px;
+            z-index: 100;
+        }
+
+        .control-btn {
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+        }
+
+        .control-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.08);
+        }
+
+        .control-btn.off {
+            background: #ff4444;
+            color: #fff;
+        }
+
+        .control-btn.leave {
+            background: #ff4444;
+            border-radius: 14px;
+            width: auto;
+            padding: 0 24px;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .control-btn.leave:hover {
+            background: #cc0000;
+        }
+
+        /* Overlays */
+        .room-info {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(12px);
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 60;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .offline-overlay {
+            position: absolute;
+            inset: 0;
+            background: #111;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 51;
+        }
+
+        /* Loading Spinner */
+        #loader {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s ease;
+        }
+
+        .spinner {
+            width: 44px;
+            height: 44px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Mobile Adjustments */
+        @media (max-width: 768px) {
+            .pip-video-wrapper {
+                width: 120px;
+                top: 12px;
+                right: 12px;
+            }
+
+            .control-bar {
+                bottom: 24px;
+                width: 90%;
+                justify-content: space-around;
+                padding: 10px;
+            }
+
+            .control-btn {
+                width: 50px;
+                height: 50px;
+            }
+
+            .control-btn.leave span {
+                display: none;
+            }
+
+            .control-btn.leave {
+                width: 50px;
+                padding: 0;
+                border-radius: 50%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="loader">
+        <div class="spinner mb-6"></div>
+        <div class="text-sm font-medium tracking-wide">Joining Room...</div>
+    </div>
+
+    <div class="meeting-container">
+        <!-- Room Info -->
+        <div class="room-info">
+            <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+            LIVE: <span id="roomCodeDisplay">---</span>
+        </div>
+
+        <!-- Video Slots -->
+        <div id="mainWrapper" class="main-video-wrapper">
+            <video id="teacherVideo" autoplay playsinline></video>
+            <div id="mainOffOverlay" class="offline-overlay">
+                <svg class="w-12 h-12 text-gray-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z">
+                    </path>
+                </svg>
+                <div class="text-xs uppercase font-bold text-gray-500">Camera Off</div>
+            </div>
+        </div>
+
+        <div id="pipWrapper" class="pip-video-wrapper" onclick="swapVideos()">
+            <video id="pipVideo" autoplay playsinline muted></video>
+            <div id="pipOffOverlay" class="offline-overlay">
+                <svg class="w-10 h-10 text-gray-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z">
+                    </path>
+                </svg>
+                <div class="text-[10px] uppercase font-bold text-gray-500">Camera Off</div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="control-bar">
+            <button id="btnMic" class="control-btn" onclick="toggleMic()">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z">
+                    </path>
+                </svg>
+            </button>
+            <button id="btnCam" class="control-btn" onclick="toggleCam()">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z">
+                    </path>
+                </svg>
+            </button>
+            <button class="control-btn leave" onclick="leaveMeeting()">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
+                    </path>
+                </svg>
+                <span class="ml-2">Leave</span>
+            </button>
+            <button class="control-btn" onclick="window.location.href='/'" title="Exit to Home">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6">
+                    </path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Background Processing -->
+    <video id="hiddenVideo" autoplay playsinline muted style="display:none"></video>
+
+    <script>
+        let socket = null;
+        const state = {
+            stream: null,
+            pc: null,
+            room: new URLSearchParams(window.location.search).get('code') || localStorage.getItem('active_class_code'),
+            user: JSON.parse(localStorage.getItem('user_info')),
+            isMainTeacher: true,
+            faceMesh: null,
+            isDragging: false,
+            // ML Detection History
+            attentionHistory: [],
+            lastEmitTime: 0,
+            eyesClosedStart: null,
+            lookingDownStart: null,
+            isFocused: true
+        };
+
+        async function init() {
+            if (!state.user || !state.room) {
+                window.location.href = '/student_dashboard.html';
+                return;
+            }
+
+            document.getElementById('roomCodeDisplay').innerText = state.room;
+
+            // 1. Start Camera First
+            const started = await startMedia();
+
+            if (started) {
+                // 2. Connect Socket
+                connectSocket();
+                // 3. Load ML After Camera
+                initML();
+            }
+
+            // 4. Smooth Fade Loader (always hide to prevent stuck screen)
+            const loader = document.getElementById('loader');
+            if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+            }
+        }
+
+        async function startMedia() {
+            try {
+                state.stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: true
+                });
+                document.getElementById('pipVideo').srcObject = state.stream;
+                document.getElementById('hiddenVideo').srcObject = state.stream;
+                return true;
+            } catch (e) {
+                alert("Camera access is required for the meeting.");
+                return false;
+            }
+        }
+
+        function connectSocket() {
+            socket = io();
+
+            socket.on("connect", () => {
+                console.log("Student socket connected:", socket.id);
+                socket.emit('join_class', {
+                    room: state.room,
+                    student_id: state.user.id,
+                    student_name: state.user.name
+                });
+            });
+
+            socket.on("disconnect", () => {
+                console.log("Student socket disconnected");
+            });
+
+            socket.on("connect_error", (err) => {
+                console.error("Socket connection error:", err);
+            });
+
+            socket.on('teacher_offer', async (data) => {
+                if (state.pc) state.pc.close();
+                state.pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+                state.pc.ontrack = (e) => {
+                    const target = state.isMainTeacher ? document.getElementById('teacherVideo') : document.getElementById('pipVideo');
+                    target.srcObject = e.streams[0];
+                };
+
+                state.stream.getTracks().forEach(t => state.pc.addTrack(t, state.stream));
+
+                state.pc.onicecandidate = (e) => {
+                    if (e.candidate) socket.emit('ice_candidate', { room: state.room, student_id: state.user.id, candidate: e.candidate, from: socket.id });
+                };
+
+                await state.pc.setRemoteDescription(data.offer);
+                const answer = await state.pc.createAnswer();
+                await state.pc.setLocalDescription(answer);
+                socket.emit('student_answer', { room: state.room, student_id: state.user.id, answer: answer, from: socket.id });
+            });
+
+            socket.on('ice_candidate', (d) => state.pc && state.pc.addIceCandidate(d.candidate));
+
+            socket.on('monitor_control', (data) => {
+                if (data.student_id !== state.user.id) return;
+
+                const micTrack = state.stream.getAudioTracks()[0];
+                const camTrack = state.stream.getVideoTracks()[0];
+
+                switch (data.action) {
+                    case 'mute': if (micTrack) micTrack.enabled = false; break;
+                    case 'unmute': if (micTrack) micTrack.enabled = true; break;
+                    case 'cam_off': if (camTrack) camTrack.enabled = false; break;
+                    case 'cam_on': if (camTrack) camTrack.enabled = true; break;
+                }
+
+                updateUI();
+                syncStatus('mic', micTrack ? micTrack.enabled : false);
+                syncStatus('camera', camTrack ? camTrack.enabled : false);
+            });
+
+            socket.on('kicked', () => { alert("Removed from class."); window.location.href = '/student_dashboard.html'; });
+            socket.on('class_ended', () => { window.location.href = '/student_dashboard.html'; });
+        }
+
+        function toggleMic() {
+            const t = state.stream.getAudioTracks()[0];
+            if (t) { t.enabled = !t.enabled; updateUI(); syncStatus('mic', t.enabled); }
+        }
+
+        function toggleCam() {
+            const t = state.stream.getVideoTracks()[0];
+            if (t) { t.enabled = !t.enabled; updateUI(); syncStatus('camera', t.enabled); }
+        }
+
+        function updateUI() {
+            const micEnabled = state.stream.getAudioTracks()[0]?.enabled;
+            const camEnabled = state.stream.getVideoTracks()[0]?.enabled;
+
+            document.getElementById('btnMic').classList.toggle('off', !micEnabled);
+            document.getElementById('btnCam').classList.toggle('off', !camEnabled);
+
+            // Show overlay ONLY on the slot currently holding the local camera stream
+            const pipOverlay = document.getElementById('pipOffOverlay');
+            const mainOverlay = document.getElementById('mainOffOverlay');
+
+            if (state.isMainTeacher) {
+                // Local stream is in PIP
+                pipOverlay.style.display = camEnabled ? 'none' : 'flex';
+                mainOverlay.style.display = 'none';
+            } else {
+                // Local stream is in Main
+                mainOverlay.style.display = camEnabled ? 'none' : 'flex';
+                pipOverlay.style.display = 'none';
+            }
+        }
+
+        function syncStatus(type, enabled) {
+            socket.emit('student_control_sync', { room: state.room, student_id: state.user.id, type, enabled });
+        }
+
+        function swapVideos() {
+            if (state.isDragging) return;
+
+            const main = document.getElementById('teacherVideo');
+            const pip = document.getElementById('pipVideo');
+            const tempStream = main.srcObject;
+
+            main.srcObject = pip.srcObject;
+            pip.srcObject = tempStream;
+            state.isMainTeacher = !state.isMainTeacher;
+
+            // Maintain mirrored view for current user, flat view for teacher
+            if (state.isMainTeacher) {
+                main.style.transform = 'scaleX(1)';
+                pip.style.transform = 'scaleX(-1)';
+            } else {
+                main.style.transform = 'scaleX(-1)';
+                pip.style.transform = 'scaleX(1)';
+            }
+
+            // Sync overlays after swap
+            updateUI();
+        }
+
+        function leaveMeeting() {
+            if (confirm("Are you sure you want to leave?")) {
+                if (socket) socket.emit('student_leave', { room: state.room, student_id: state.user.id });
+                if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+                window.location.href = '/student_dashboard.html';
+            }
+        }
+
+        async function initML() {
+            try {
+                state.faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
+                state.faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5 });
+                state.faceMesh.onResults(onFaceResults);
+                await state.faceMesh.initialize();
+
+                const vid = document.getElementById('hiddenVideo');
+                async function loop() {
+                    if (!vid.paused && !vid.ended) await state.faceMesh.send({ image: vid });
+                    requestAnimationFrame(loop);
+                }
+                loop();
+            } catch (e) { console.warn("AI Load skipped/failed", e); }
+        }
+
+        function onFaceResults(results) {
+            const now = Date.now();
+            let rawScore = 0;
+            let status = "Face Not Detected";
+            let debugInfo = {};
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) {
+                const landmarks = results.multiFaceLandmarks[0];
+
+                // 1. EAR (Eye Aspect Ratio) calculation
+                // Left Eye: 159(top), 145(bottom), 33(inner), 133(outer)
+                const earL = Math.abs(landmarks[159].y - landmarks[145].y) / Math.abs(landmarks[33].x - landmarks[133].x);
+                // Right Eye: 386(top), 374(bottom), 362(inner), 263(outer)
+                const earR = Math.abs(landmarks[386].y - landmarks[374].y) / Math.abs(landmarks[362].x - landmarks[263].x);
+                const avgEAR = (earL + earR) / 2;
+
+                // 2. Head Pose estimation (Simplified Yaw/Pitch)
+                // Nose(4), LeftEye(33), RightEye(263)
+                const nose = landmarks[4];
+                const eyeL = landmarks[33];
+                const eyeR = landmarks[263];
+                const midEyes = { x: (eyeL.x + eyeR.x) / 2, y: (eyeL.y + eyeR.y) / 2 };
+                const eyeDist = Math.sqrt(Math.pow(eyeR.x - eyeL.x, 2) + Math.pow(eyeR.y - eyeL.y, 2));
+
+                const yaw = (nose.x - midEyes.x) / eyeDist; // Center is 0
+                const pitch = (nose.y - midEyes.y) / eyeDist; // Center is ~0.3-0.5 depending on cam
+
+                // 3. Scoring Logic
+                rawScore = 100;
+                status = "Focused";
+
+                // Eye Closure logic
+                if (avgEAR < 0.12) {
+                    if (!state.eyesClosedStart) state.eyesClosedStart = now;
+                    const closedDuration = now - state.eyesClosedStart;
+                    if (closedDuration > 2000) {
+                        rawScore -= 70;
+                        status = "Sleepy";
+                    } else if (closedDuration > 500) {
+                        rawScore -= 30; // Blinking or looking down
+                    }
+                } else {
+                    state.eyesClosedStart = null;
+                }
+
+                // Head Pose logic (Yaw: looking left/right)
+                if (Math.abs(yaw) > 0.25) {
+                    rawScore -= 50;
+                    status = (yaw > 0) ? "Looking Right" : "Looking Left";
+                }
+
+                // Head Pose logic (Pitch: looking up/down)
+                // Ideal neutral pitch is approx 0.35-0.45 relative to eyes center
+                const normalizedPitch = pitch - 0.4;
+                if (normalizedPitch > 0.15) {
+                    if (!state.lookingDownStart) state.lookingDownStart = now;
+                    const downDuration = now - state.lookingDownStart;
+                    if (downDuration > 3000) {
+                        rawScore -= 60; // Reduce below 50%
+                        status = "Looking Down (Long)";
+                    } else {
+                        rawScore -= 20;
+                        status = "Looking Down";
+                    }
+                } else {
+                    state.lookingDownStart = null;
+                    if (normalizedPitch < -0.15) {
+                        rawScore -= 40;
+                        status = "Looking Up";
+                    }
+                }
+
+                debugInfo = { ear: avgEAR.toFixed(3), yaw: yaw.toFixed(2), pitch: normalizedPitch.toFixed(2) };
+            }
+
+            // Clamp score
+            rawScore = Math.max(0, Math.min(100, rawScore));
+
+            // 4. Moving Average (Smoothing)
+            state.attentionHistory.push(rawScore);
+            if (state.attentionHistory.length > 5) state.attentionHistory.shift();
+            const smoothedScore = Math.round(state.attentionHistory.reduce((a, b) => a + b) / state.attentionHistory.length);
+
+            // 5. Emit every 1 second
+            if (now - state.lastEmitTime >= 1000) {
+                console.log(`[ML] Attention calculated: ${smoothedScore}% (${status})`);
+                if (socket && socket.connected) {
+                    console.log(`[Socket] Emitting attention-update for room ${state.room}`);
+                    socket.emit('attention-update', {
+                        userId: state.user.id,
+                        room: state.room,
+                        attention: smoothedScore,
+                        status: status,
+                        student_name: state.user.name
+                    });
+                } else {
+                    console.warn("[Socket] Not connected. Cannot emit attention.");
+                }
+                state.lastEmitTime = now;
+            }
+        }
+
+        // --- DRAGGABLE PIP ---
+        let dragOffset = { x: 0, y: 0 };
+        const pipEl = document.getElementById('pipWrapper');
+        let rect_start_x = 0;
+
+        function startDrag(e) {
+            state.isDragging = false;
+            const event = e.type === 'touchstart' ? e.touches[0] : e;
+            const rect = pipEl.getBoundingClientRect();
+            dragOffset.x = event.clientX - rect.left;
+            dragOffset.y = event.clientY - rect.top;
+
+            document.addEventListener('mousemove', dragMove);
+            document.addEventListener('mouseup', endDrag);
+            document.addEventListener('touchmove', dragMove, { passive: false });
+            document.addEventListener('touchend', endDrag);
+        }
+
+        function dragMove(e) {
+            const event = e.type === 'touchmove' ? e.touches[0] : e;
+            const dx = event.clientX - dragOffset.x;
+            const dy = event.clientY - dragOffset.y;
+
+            // Prevent swapping if moved more than 5px
+            if (Math.abs(event.clientX - rect_start_x) > 5) state.isDragging = true;
+
+            const pw = pipEl.offsetWidth;
+            const ph = pipEl.offsetHeight;
+            const ww = window.innerWidth;
+            const wh = window.innerHeight;
+
+            // Bound checks
+            let left = Math.max(0, Math.min(dx, ww - pw));
+            let top = Math.max(0, Math.min(dy, wh - ph));
+
+            pipEl.style.left = left + 'px';
+            pipEl.style.top = top + 'px';
+            pipEl.style.right = 'auto';
+            pipEl.style.margin = '0';
+
+            if (e.type === 'touchmove') e.preventDefault();
+        }
+
+        function endDrag(e) {
+            setTimeout(() => { state.isDragging = false; }, 100);
+            document.removeEventListener('mousemove', dragMove);
+            document.removeEventListener('mouseup', endDrag);
+            document.removeEventListener('touchmove', dragMove);
+            document.removeEventListener('touchend', endDrag);
+        }
+
+        pipEl.addEventListener('mousedown', (e) => { rect_start_x = e.clientX; startDrag(e); });
+        pipEl.addEventListener('touchstart', (e) => { rect_start_x = e.touches[0].clientX; startDrag(e); }, { passive: false });
+
+        window.addEventListener('beforeunload', () => {
+            if (state.socket) state.socket.emit('student_leave', { room: state.room, student_id: state.user.id });
+            if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+        });
+
+        window.onload = init;
+    </script>
+</body>
+
+</html>

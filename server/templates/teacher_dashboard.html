@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classroom - Teacher</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: #0b1120;
+            color: white;
+        }
+
+        /* Stats Cards */
+        .stat-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        /* Video Card */
+        .video-card {
+            background: #1e293b;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            aspect-ratio: 16/9;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            border: 1px solid #334155;
+        }
+
+        .video-card video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 8px 12px;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Custom Modal Backdrop */
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .modal-backdrop.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 16px;
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+            transform: scale(0.95);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .modal-backdrop.active .modal-content {
+            transform: scale(1);
+        }
+
+        .hidden-view {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex flex-col relative overflow-hidden">
+
+    <!-- START OVERLAY REMOVED -->
+
+    <!-- HEADER -->
+    <header
+        class="h-20 bg-[#0f172a] border-b border-slate-800 flex items-center justify-between px-8 shrink-0 relative z-10"
+        id="main-header">
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight">Classroom <span class="text-blue-500">.Live</span></h1>
+            <div id="header-session-info"
+                class="hidden flex items-center gap-2 text-xs font-bold text-green-400 uppercase tracking-wider mt-1">
+                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                <span>Live Session • <span id="header-class-code">...</span></span>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <button onclick="openShareModal()" id="btn-share"
+                class="hidden px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-bold flex items-center gap-2 transition hover:shadow-lg hover:shadow-purple-500/20">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z">
+                    </path>
+                </svg>
+                <span>Share Link</span>
+            </button>
+
+            <div class="bg-slate-800 p-1 rounded-lg flex border border-slate-700">
+                <button onclick="switchView('dashboard')" id="btn-dashboard"
+                    class="px-4 py-1.5 rounded-md text-sm font-bold transition bg-slate-600 text-white shadow-sm">Dashboard</button>
+                <button onclick="switchView('gallery')" id="btn-gallery"
+                    class="px-4 py-1.5 rounded-md text-sm font-bold transition text-slate-400 hover:text-white">Gallery</button>
+            </div>
+
+            <button onclick="downloadReport()"
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-bold flex items-center gap-2 transition hover:shadow-lg hover:shadow-blue-500/20">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+                    </path>
+                </svg>
+                <span>Report</span>
+            </button>
+
+            <button onclick="toggleClassSession()" id="btn-session-control"
+                class="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm font-bold flex items-center gap-2 transition hover:shadow-lg hover:shadow-green-500/20">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z">
+                    </path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <span>Start Class</span>
+            </button>
+            <button onclick="window.location.href='/'"
+                class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-bold flex items-center gap-2 transition hover:shadow-lg">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M11 15l-3-3m0 0l3-3m-3 3h8M3 12a9 9 0 1118 0 9 9 0 01-18 0z" />
+                </svg>
+                <span>Exit</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- CONTENT -->
+    <main class="flex-1 p-8 overflow-y-auto relative z-0" id="main-content">
+
+        <!-- DASHBOARD VIEW -->
+        <div id="view-dashboard" class="animate-fade-in">
+            <!-- Stats -->
+            <div class="grid grid-cols-4 gap-6 mb-8">
+                <div class="stat-card">
+                    <div class="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Active Students</div>
+                    <div id="stat-active" class="text-3xl font-bold">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Class Average</div>
+                    <div id="stat-avg" class="text-3xl font-bold text-blue-400">0%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Low Attention</div>
+                    <div id="stat-low" class="text-3xl font-bold text-yellow-400">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Critical Alerts</div>
+                    <div id="stat-alerts" class="text-3xl font-bold text-red-400">0</div>
+                </div>
+            </div>
+
+            <!-- Full-Width Table (Alerts Removed) -->
+            <div class="col-span-12 bg-[#1e293b] rounded-xl border border-slate-700 overflow-hidden shadow-xl">
+                <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
+                    <h3 class="font-bold">Student Monitoring (Real-Time)</h3>
+                    <div class="flex gap-2 text-[10px] font-bold uppercase tracking-wide">
+                        <span class="px-2 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20">Good
+                            &gt; 70%</span>
+                        <span class="px-2 py-1 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">Avg
+                            40-70%</span>
+                        <span class="px-2 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20">Critical
+                            &lt; 40%</span>
+                    </div>
+                </div>
+                <table class="w-full text-left">
+                    <thead class="bg-slate-800 text-xs uppercase text-slate-400 font-bold">
+                        <tr>
+                            <th class="px-6 py-4">Student</th>
+                            <th class="px-6 py-4">Status</th>
+                            <th class="px-6 py-4 w-1/3">Attention</th>
+                            <th class="px-6 py-4">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="student-table-body" class="divide-y divide-slate-700 text-sm">
+                        <tr>
+                            <td colspan="4" class="px-6 py-8 text-center text-slate-500">Waiting for students...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        </div>
+
+        <!-- GALLERY VIEW -->
+        <div id="view-gallery" class="hidden-view animate-fade-in">
+            <div class="bg-[#1e293b] rounded-xl border border-slate-700 p-6 min-h-[600px] shadow-xl">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="font-bold text-lg">Live Class - Gallery View</h3>
+                    <div class="text-sm text-slate-400">Teacher + Active Students</div>
+                </div>
+
+                <div id="video-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    <!-- Teacher Card -->
+                    <div class="video-card group ring-2 ring-blue-500/50">
+                        <video id="teacherLocalVideo" autoplay playsinline muted></video>
+                        <div
+                            class="video-overlay transition-opacity opacity-0 group-hover:opacity-100 p-3 flex flex-col justify-end">
+                            <div class="flex flex-col items-center gap-2">
+                                <div
+                                    class="text-[10px] font-bold bg-blue-600 px-2 py-0.5 rounded border border-white/5 uppercase tracking-wider">
+                                    You (Host)</div>
+                                <div class="flex gap-2 justify-center">
+                                    <button onclick="toggleTeacherMic()" id="btn-mic"
+                                        class="p-2.5 rounded-full bg-slate-700/80 text-white hover:bg-slate-600 transition-all backdrop-blur-md shadow-lg border border-white/5"
+                                        title="Toggle Mic">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z">
+                                            </path>
+                                        </svg>
+                                    </button>
+                                    <button onclick="toggleTeacherCam()" id="btn-cam"
+                                        class="p-2.5 rounded-full bg-slate-700/80 text-white hover:bg-slate-600 transition-all backdrop-blur-md shadow-lg border border-white/5"
+                                        title="Toggle Camera">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z">
+                                            </path>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+
+
+    <!-- SHARE MODAL -->
+    <div id="share-modal" class="modal-backdrop">
+        <div class="modal-content text-center">
+            <div
+                class="w-12 h-12 bg-purple-600/20 text-purple-400 rounded-full mx-auto flex items-center justify-center mb-4">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1">
+                    </path>
+                </svg>
+            </div>
+            <h3 class="text-xl font-bold mb-2">Invite Students</h3>
+            <p class="text-slate-400 text-sm mb-6">Share this code or link with your students.</p>
+
+            <div class="bg-black/30 p-4 rounded-xl border border-slate-700/50 mb-4">
+                <div class="text-xs text-slate-500 uppercase font-bold mb-1">Class Code</div>
+                <div class="text-3xl font-mono font-bold text-green-400 tracking-wider" id="share-code">...</div>
+            </div>
+
+            <button onclick="copyLink()"
+                class="w-full py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-bold transition flex items-center justify-center gap-2">
+                <span>📋 Copy Direct Link</span>
+            </button>
+            <button onclick="closeShareModal()" class="mt-4 text-slate-500 hover:text-white text-sm">Close</button>
+        </div>
+    </div>
+
+    <!-- END SUMMARY MODAL -->
+    <div id="end-modal" class="modal-backdrop">
+        <div class="modal-content text-center">
+            <div
+                class="w-16 h-16 bg-red-500/20 text-red-500 rounded-full mx-auto flex items-center justify-center mb-6">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+            </div>
+            <h2 class="text-2xl font-bold mb-2">Class Ended</h2>
+            <p class="text-slate-400 mb-8">The session has been terminated for all students.</p>
+            <div class="flex gap-4">
+                <button onclick="downloadReport()"
+                    class="flex-1 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold">Download Report</button>
+                <button onclick="location.reload()"
+                    class="flex-1 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-bold">Start New</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed bottom-6 right-6 flex flex-col gap-2 z-50"></div>
+
+    <script>
+        const socket = io();
+        let currentState = {
+            view: 'dashboard',
+            teacherStream: null,
+            students: {},
+            classCode: localStorage.getItem('classCode') || 'CLASS' + Math.floor(1000 + Math.random() * 9000)
+        };
+
+        localStorage.setItem('classCode', currentState.classCode);
+
+        // --- SESSION CONTROL ---
+        let isSessionActive = false;
+
+        function toggleClassSession() {
+            if (!isSessionActive) {
+                // START
+                initMediaAndCreateClass();
+            } else {
+                // END
+                endClass();
+            }
+        }
+
+        async function initMediaAndCreateClass() {
+            // Update UI to Active State
+            isSessionActive = true;
+            const btn = document.getElementById('btn-session-control');
+            btn.className = "px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-bold flex items-center gap-2 transition hover:shadow-lg hover:shadow-red-500/20";
+            btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg><span>End Class</span>`;
+
+            document.getElementById('header-session-info').classList.remove('hidden');
+            document.getElementById('btn-share').classList.remove('hidden');
+
+            try {
+                // Media
+                try {
+                    currentState.teacherStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    const localVid = document.getElementById('teacherLocalVideo');
+                    if (localVid) {
+                        localVid.srcObject = currentState.teacherStream;
+                        localVid.muted = true; // Extra safety
+                    }
+                } catch (err) {
+                    console.error("Camera access failed:", err);
+                    alert("Unable to access camera. Please check permissions.");
+                    isSessionActive = false; // Reset state
+                    return;
+                }
+
+                // Socket Create Class
+                console.log("DEBUG: Starting new class session...");
+                socket.emit('create_class');
+
+                // Emit teacher-stream signal
+                socket.emit('teacher-stream', {
+                    room: currentState.classCode,
+                    streamId: currentState.teacherStream.id
+                });
+
+                // Persist State
+                localStorage.setItem('isSessionActive', 'true');
+
+                // Re-sync with any students already in the room
+                console.log("DEBUG: Requesting sync for existing students...");
+                socket.emit('request_sync', { room: currentState.classCode });
+            } catch (e) {
+                console.error("Media/Server Error", e);
+                showToast("Error: " + e.message, "error");
+            }
+        }
+
+        socket.on('class_created', (data) => {
+            currentState.classCode = data.code;
+            localStorage.setItem('classCode', data.code);
+            document.getElementById('header-class-code').innerText = data.code;
+            document.getElementById('share-code').innerText = data.code;
+
+            // SYNC REQUEST: Get any students already waiting
+            socket.emit('request_sync', { room: currentState.classCode });
+
+            // Dashboard is now real-time via dashboard_update events.
+            fetchStudentData();
+        });
+
+        // --- DASHBOARD ACTIONS ---
+        function switchView(viewName) {
+            currentState.view = viewName;
+            const dash = document.getElementById('view-dashboard');
+            const gal = document.getElementById('view-gallery');
+            const btnDash = document.getElementById('btn-dashboard');
+            const btnGal = document.getElementById('btn-gallery');
+
+            if (viewName === 'dashboard') {
+                dash.classList.remove('hidden-view');
+                gal.classList.add('hidden-view');
+                btnDash.className = "px-4 py-1.5 rounded-md text-sm font-bold transition bg-slate-600 text-white shadow-sm";
+                btnGal.className = "px-4 py-1.5 rounded-md text-sm font-bold transition text-slate-400 hover:text-white";
+            } else {
+                dash.classList.add('hidden-view');
+                gal.classList.remove('hidden-view');
+                btnGal.className = "px-4 py-1.5 rounded-md text-sm font-bold transition bg-slate-600 text-white shadow-sm";
+                btnDash.className = "px-4 py-1.5 rounded-md text-sm font-bold transition text-slate-400 hover:text-white";
+            }
+        }
+
+        // --- MODALS ---
+        function openShareModal() { document.getElementById('share-modal').classList.add('active'); }
+        function closeShareModal() { document.getElementById('share-modal').classList.remove('active'); }
+
+        async function copyLink() {
+            const link = window.location.protocol + "//" + window.location.host + "/student_monitor.html?code=" + currentState.classCode;
+            const text = `Join my Class!\nLink: ${link}\nCode: ${currentState.classCode}`;
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast("Link Copied!", "success");
+                closeShareModal();
+            } catch (err) {
+                prompt("Copy this:", text);
+            }
+        }
+
+        function endClass() {
+            if (!confirm("Are you sure you want to end this class for everyone?")) return;
+
+            // Use socket instead of fetch to avoid SSL/Network issues on end class
+            socket.emit('end_class', { room: currentState.classCode });
+        }
+
+        socket.on('class_ended_confirm', (data) => {
+            if (data.success) {
+                localStorage.removeItem('isSessionActive');
+                localStorage.removeItem('classCode');
+                document.getElementById('end-modal').classList.add('active');
+            } else {
+                alert("Error ending class: " + data.error);
+            }
+        });
+
+        // --- WEBRTC & SOCKET ---
+        socket.on('user_joined', async (data) => {
+            console.log("DEBUG: user_joined", data);
+            showToast(`${data.student_name} joined the class`, 'info');
+            await initiateCall(data.id, data.student_id, data.student_name);
+        });
+
+        socket.on('student_left', (d) => {
+            console.log("Student Left:", d);
+            if (d.is_final) {
+                if (currentState.students[d.student_id]?.pc) {
+                    currentState.students[d.student_id].pc.close();
+                }
+                delete currentState.students[d.student_id];
+                const card = document.getElementById(`vid-${d.student_id}`);
+                if (card) card.remove();
+            }
+        });
+
+        // Dashboard Update (Single Source of Truth from Server)
+        socket.on('dashboard_update', (data) => {
+            console.log("DEBUG: Dashboard broadcast received:", data);
+
+            // 1. Update counters
+            document.getElementById('stat-active').innerText = data.active_count;
+            document.getElementById('stat-avg').innerText = data.class_avg + '%';
+            document.getElementById('stat-low').innerText = data.low_count;
+            document.getElementById('stat-alerts').innerText = data.critical_count;
+
+            // 2. Refresh Table if in view
+            if (currentState.view === 'dashboard') renderTable(data.students);
+
+            // 3. Update Gallery UI
+            data.students.forEach(s => {
+                const attnEl = document.getElementById(`gal-attn-${s.id}`);
+                const dotEl = document.getElementById(`gal-status-dot-${s.id}`);
+                const card = document.getElementById(`vid-${s.id}`);
+
+                if (attnEl) attnEl.innerText = `${Math.round(s.attention)}%`;
+
+                if (card) {
+                    const status = getStatusInfo(s.attention, s.status);
+                    const colorMap = { 'green': 'bg-green-500', 'yellow': 'bg-yellow-500', 'red': 'bg-red-500' };
+                    const ringMap = { 'green': 'ring-green-500', 'yellow': 'ring-yellow-500', 'red': 'ring-red-500' };
+
+                    if (dotEl) dotEl.className = `w-2 h-2 rounded-full ${colorMap[status.color] || 'bg-slate-500 shadow-sm'}`;
+                    card.classList.remove('ring-green-500', 'ring-yellow-500', 'ring-red-500', 'ring-2');
+                    card.classList.add(ringMap[status.color], 'ring-2');
+                }
+            });
+        });
+
+        // Real-time Individual Update (High Frequency)
+        socket.on('attention-update', (data) => {
+            console.log("[Socket] Received high-freq attention:", data);
+            const { userId, attention, status, userName } = data;
+
+            // Ensure student is in local state
+            if (!currentState.students[userId]) {
+                currentState.students[userId] = { name: userName || 'Student', id: userId };
+            }
+
+            const student = currentState.students[userId];
+            student.attention = attention;
+            student.status = status;
+            student.connected = true;
+
+            // Instant stats recalculation
+            updateDashboardStats();
+
+            // Instant Gallery Update
+            const attnEl = document.getElementById(`gal-attn-${userId}`);
+            if (attnEl) attnEl.innerText = `${Math.round(attention)}%`;
+
+            const card = document.getElementById(`vid-${userId}`);
+            if (card) {
+                const info = getStatusInfo(attention, status);
+                const ringMap = { 'green': 'ring-green-500', 'yellow': 'ring-yellow-500', 'red': 'ring-red-500' };
+                card.classList.remove('ring-green-500', 'ring-yellow-500', 'ring-red-500', 'ring-2');
+                card.classList.add(ringMap[info.color], 'ring-2');
+            }
+        });
+
+        // --- CALL LOGIC (Bidirectional) ---
+        async function initiateCall(socketId, dbId, name) {
+            if (!currentState.teacherStream) {
+                console.warn(`DEBUG: Cannot initiate call for ${name} - Teacher stream not ready.`);
+                return;
+            }
+
+            // Cleanup existing connection for this student (Persistence)
+            if (currentState.students[dbId] && currentState.students[dbId].pc) {
+                currentState.students[dbId].pc.close();
+            }
+
+            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            currentState.students[dbId] = { pc, socketId, name };
+
+            // Add Tracks
+            currentState.teacherStream.getTracks().forEach(t => {
+                console.log(`DEBUG: Adding teacher track ${t.kind} to PC for ${dbId}`);
+                pc.addTrack(t, currentState.teacherStream);
+            });
+
+            // On Remote Track
+            pc.ontrack = (event) => {
+                addVideoCard(socketId, dbId, name, event.streams[0]);
+            };
+
+            // ICE
+            pc.onicecandidate = (e) => {
+                if (e.candidate) {
+                    console.log(`DEBUG: Sending ICE candidate to ${dbId}`);
+                    socket.emit('ice_candidate', { to: socketId, candidate: e.candidate, student_id: 'teacher' });
+                }
+            };
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket.emit('teacher_offer', { room: currentState.classCode, to: socketId, offer });
+        }
+
+        socket.on('student_answer', async (d) => {
+            const pc = currentState.students[d.student_id]?.pc;
+            if (pc) {
+                await pc.setRemoteDescription(d.answer);
+            }
+        });
+        socket.on('ice_candidate', async (d) => {
+            const pc = currentState.students[d.student_id]?.pc;
+            if (pc) {
+                await pc.addIceCandidate(d.candidate);
+            }
+        });
+
+        socket.on('student_control_sync', (data) => {
+            const { student_id, type, enabled } = data;
+
+            // Persistence
+            if (!currentState.students[student_id]) currentState.students[student_id] = {};
+            if (type === 'mic') currentState.students[student_id].micEnabled = enabled;
+            if (type === 'camera') currentState.students[student_id].camEnabled = enabled;
+
+            // UI Update (Remote Control Buttons)
+            const remoteBtnId = `btn-remote-${type === 'mic' ? 'mic' : 'cam'}-${student_id}`;
+            const tableBtnId = `table-btn-${type === 'mic' ? 'mic' : 'cam'}-${student_id}`;
+            const remoteBtn = document.getElementById(remoteBtnId);
+            const tableBtn = document.getElementById(tableBtnId);
+
+            [remoteBtn, tableBtn].forEach(btn => {
+                if (btn) {
+                    if (enabled) {
+                        btn.classList.remove('bg-red-600', 'text-white');
+                        btn.classList.add(type === 'mic' ? 'bg-blue-600/20' : 'bg-yellow-600/20', type === 'mic' ? 'text-blue-400' : 'text-yellow-400');
+                    } else {
+                        btn.classList.add('bg-red-600', 'text-white');
+                        btn.classList.remove('bg-blue-600/20', 'bg-yellow-600/20', 'text-blue-400', 'text-yellow-400');
+                    }
+                }
+            });
+        });
+
+        // --- HELPERS ---
+        function getStatusInfo(attention, statusStr = 'Focused') {
+            const s = statusStr.toLowerCase();
+
+            // Map detailed ML statuses to dashboard types
+            if (s.includes('sleepy')) return { label: 'Sleepy', color: 'red', class: 'bg-red-500/20 text-red-400 animate-pulse' };
+            if (s.includes('spoof')) return { label: 'Spoof!', color: 'red', class: 'bg-red-600 text-white font-black' };
+            if (s.includes('not detected')) return { label: 'No Face', color: 'red', class: 'bg-slate-700 text-slate-400' };
+            if (s.includes('left') || s.includes('right') || s.includes('away')) return { label: 'Looking Away', color: 'yellow', class: 'bg-yellow-500/20 text-yellow-400' };
+            if (s.includes('down') || s.includes('up')) return { label: 'Out of focus', color: 'yellow', class: 'bg-yellow-500/20 text-yellow-400' };
+            if (s.includes('distracted')) return { label: 'Distracted', color: 'yellow', class: 'bg-yellow-500/20 text-yellow-400' };
+
+            // Fallback to score-based status
+            if (attention >= 70) return { label: 'Focused', color: 'green', class: 'bg-green-500/20 text-green-400' };
+            if (attention >= 40) return { label: 'Average', color: 'yellow', class: 'bg-yellow-500/20 text-yellow-400' };
+            return { label: 'Critical', color: 'red', class: 'bg-red-500/20 text-red-400' };
+        }
+
+        function updateDashboardStats() {
+            const studentList = Object.values(currentState.students).filter(s => s.connected && s.attention !== undefined);
+            const activeCount = studentList.length;
+            const avg = activeCount > 0 ? Math.round(studentList.reduce((acc, s) => acc + (s.attention || 0), 0) / activeCount) : 0;
+            const low = studentList.filter(s => s.attention < 70).length;
+            const critical = studentList.filter(s => s.attention < 40).length;
+
+            document.getElementById('stat-active').innerText = activeCount;
+            document.getElementById('stat-avg').innerText = avg + '%';
+            document.getElementById('stat-low').innerText = low;
+            document.getElementById('stat-alerts').innerText = critical;
+
+            console.log(`[Dashboard Stats] Local recalculation: Active=${activeCount}, Avg=${avg}%`);
+        }
+
+        function addVideoCard(socketId, dbId, name, stream) {
+            // Check if card exists by DB ID (Stable)
+            let card = document.getElementById(`vid-${dbId}`);
+            if (card) {
+                // Update stream if needed
+                const vid = card.querySelector('video');
+                if (vid.srcObject !== stream) vid.srcObject = stream;
+                return;
+            }
+
+            const div = document.createElement('div');
+            div.id = `vid-${dbId}`;
+            div.className = "video-card group animate-fade-in";
+            div.innerHTML = `
+                <video autoplay playsinline></video>
+                <div class="absolute top-2 right-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-[10px] font-bold z-10 flex items-center gap-1.5 border border-white/10">
+                    <span class="w-2 h-2 rounded-full bg-green-500" id="gal-status-dot-${dbId}"></span>
+                    <span id="gal-attn-${dbId}">--%</span>
+                </div>
+                <div id="gal-reconnect-${dbId}" class="absolute inset-0 bg-slate-900/80 backdrop-blur-sm z-20 hidden flex-col items-center justify-center text-center p-4">
+                    <div class="w-6 h-6 border-2 border-yellow-500/30 border-t-yellow-500 rounded-full animate-spin mb-2"></div>
+                    <span class="text-[10px] font-bold text-yellow-400 uppercase tracking-widest">Reconnecting...</span>
+                </div>
+                <div class="video-overlay transition-opacity opacity-0 group-hover:opacity-100 p-3 flex flex-col justify-end">
+                    <!-- Bottom Control Bar -->
+                    <div class="flex flex-col items-center gap-2">
+                        <div class="text-[10px] font-bold bg-black/40 backdrop-blur-md px-2 py-0.5 rounded border border-white/5 uppercase tracking-wider">${name}</div>
+                        <div class="flex gap-2 justify-center">
+                            <button onclick="remoteControl('${dbId}', 'mute_toggle')" id="btn-remote-mic-${dbId}" class="p-2.5 rounded-full bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white transition-all backdrop-blur-md shadow-lg border border-white/5" title="Mute/Unmute Student">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                            </button>
+                            <button onclick="remoteControl('${dbId}', 'cam_toggle')" id="btn-remote-cam-${dbId}" class="p-2.5 rounded-full bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600 hover:text-white transition-all backdrop-blur-md shadow-lg border border-white/5" title="Start/Stop Student Camera">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                            </button>
+                            <button onclick="kickStudent('${dbId}')" class="p-2.5 rounded-full bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white transition-all backdrop-blur-md shadow-lg border border-white/5" title="Kick Student">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const vid = div.querySelector('video');
+            vid.srcObject = stream;
+            vid.muted = false; // Important: Hear them
+
+            // Layout fix: Ensure grid handles it
+            document.getElementById('video-grid').appendChild(div);
+        }
+
+        // --- DASHBOARD DATA ---
+        async function fetchStudentData() {
+            try {
+                const res = await fetch(`/api/get_students?room=${currentState.classCode}`);
+                const data = await res.json();
+                if (data.success) {
+                    renderTable(data.students);
+                    updateStats(data.students);
+                    return data.students || [];
+                }
+            } catch (e) { }
+            return [];
+        }
+
+        function renderTable(students) {
+            const tbody = document.getElementById('student-table-body');
+            if (!students || students.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-500">Waiting for students...</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = students.map(s => {
+                const status = getStatusInfo(s.attention, s.status);
+                const barColor = s.attention >= 70 ? 'bg-green-500' : (s.attention >= 40 ? 'bg-yellow-500' : 'bg-red-500');
+                const rowClass = s.attention < 40 ? 'bg-red-500/5' : '';
+
+                return `
+                <tr class="hover:bg-slate-800/50 transition-colors ${rowClass}">
+                    <td class="px-6 py-4 flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center font-bold text-xs">${s.name[0]}</div>
+                        <div>
+                            <div class="font-bold">${s.name}</div>
+                            <div class="text-[10px] text-slate-500 uppercase font-mono">${s.id}</div>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4">
+                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${status.class}">
+                            ${status.label}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4">
+                        <div class="flex items-center gap-3">
+                            <div class="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                <div class="h-full ${barColor} transition-all duration-1000" style="width: ${s.attention}%"></div>
+                            </div>
+                            <span class="text-xs font-bold w-6 text-right">${Math.round(s.attention)}%</span>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 flex gap-3">
+                        <button onclick="remoteControl('${s.id}', 'mute_toggle')" id="table-btn-mic-${s.id}" class="p-1.5 rounded-md bg-blue-500/10 text-blue-400 hover:bg-blue-600 hover:text-white transition-all shadow-sm" title="Mute/Unmute Student">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                        </button>
+                        <button onclick="remoteControl('${s.id}', 'cam_toggle')" id="table-btn-cam-${s.id}" class="p-1.5 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500 hover:text-white transition-all shadow-sm" title="Start/Stop Student Camera">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                        </button>
+                        <button onclick="kickStudent('${s.id}')" class="p-1.5 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white transition-all shadow-sm" title="Remove Student">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </button>
+                    </td>
+                </tr>
+            `}).join('');
+        }
+
+
+
+        // --- ACTIONS ---
+        function downloadReport() { window.location.href = '/api/download_report'; }
+
+        async function kickStudent(dbId) {
+            if (!confirm("Kick student?")) return;
+            socket.emit('kick_student', { student_id: dbId, room: currentState.classCode });
+        }
+
+        function remoteControl(studentId, action) {
+            let finalAction = action;
+            const studentInfo = currentState.students[studentId] || {};
+
+            if (action === 'mute_toggle') {
+                finalAction = studentInfo.micEnabled !== false ? 'mute' : 'unmute';
+            } else if (action === 'cam_toggle') {
+                finalAction = studentInfo.camEnabled !== false ? 'cam_off' : 'cam_on';
+            }
+
+            console.log(`Sending remote control: ${finalAction} to student ${studentId}`);
+            socket.emit('monitor_control', {
+                room: currentState.classCode,
+                student_id: studentId,
+                action: finalAction
+            });
+            showToast(`Remote ${finalAction} sent`, 'info');
+        }
+
+        function toggleTeacherMic() {
+            const t = currentState.teacherStream.getAudioTracks()[0];
+            t.enabled = !t.enabled;
+            const btn = document.getElementById('btn-mic');
+
+            if (!t.enabled) {
+                // Muted (Red)
+                btn.classList.remove('bg-slate-700', 'hover:bg-slate-600');
+                btn.classList.add('bg-red-500', 'hover:bg-red-600');
+            } else {
+                // Unmuted (Normal)
+                btn.classList.add('bg-slate-700', 'hover:bg-slate-600');
+                btn.classList.remove('bg-red-500', 'hover:bg-red-600');
+            }
+        }
+        function toggleTeacherCam() {
+            const t = currentState.teacherStream.getVideoTracks()[0];
+            t.enabled = !t.enabled;
+            const btn = document.getElementById('btn-cam');
+
+            if (!t.enabled) {
+                // Off (Red)
+                btn.classList.remove('bg-slate-700', 'hover:bg-slate-600');
+                btn.classList.add('bg-red-500', 'hover:bg-red-600');
+            } else {
+                // On (Normal)
+                btn.classList.add('bg-slate-700', 'hover:bg-slate-600');
+                btn.classList.remove('bg-red-500', 'hover:bg-red-600');
+            }
+        }
+
+        function showToast(msg, type) {
+            const div = document.createElement('div');
+            div.className = `px-4 py-2 rounded shadow-lg text-white text-sm font-bold ${type === 'error' ? 'bg-red-500' : 'bg-blue-600'} animate-fade-in`;
+            div.innerText = msg;
+            document.getElementById('toast-container').appendChild(div);
+            setTimeout(() => div.remove(), 3000);
+        }
+
+        // Listen for socket Alert
+        // User Joined (Cleanup listener, dash_update handles data)
+        socket.on('user_joined', async (d) => {
+            showToast(`${d.student_name} joined the class`, 'info');
+            initiateCall(d.id, d.student_id, d.student_name);
+        });
+
+        socket.on('student_left', (d) => {
+            const student = currentState.students[d.student_id];
+            if (student) {
+                if (student.pc) student.pc.close();
+                delete currentState.students[d.student_id];
+            }
+
+            // Remove from DOM
+            const card = document.getElementById(`vid-${d.student_id}`);
+            if (card) card.remove();
+
+            showToast(`${d.student_name} left the class`, 'info');
+        });
+
+        socket.on('student_reconnecting', (d) => {
+            const overlay = document.getElementById(`gal-reconnect-${d.student_id}`);
+            if (overlay) overlay.classList.remove('hidden');
+        });
+
+        // --- PERSISTENCE & RESUME ---
+        async function initPersistence() {
+            const isActive = localStorage.getItem('isSessionActive') === 'true';
+            const savedCode = localStorage.getItem('classCode');
+
+            if (isActive && savedCode) {
+                currentState.classCode = savedCode;
+                await resumeClass();
+            }
+        }
+
+        async function resumeClass() {
+            isSessionActive = true;
+            const btn = document.getElementById('btn-session-control');
+            btn.className = "px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-bold flex items-center gap-2 transition hover:shadow-lg hover:shadow-red-500/20";
+            btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg><span>End Class</span>`;
+
+            document.getElementById('header-session-info').classList.remove('hidden');
+            document.getElementById('btn-share').classList.remove('hidden');
+
+            try {
+                currentState.teacherStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('teacherLocalVideo').srcObject = currentState.teacherStream;
+
+                // Use teacher_join for re-entry
+                console.log("DEBUG: Resuming class session...");
+                socket.emit('teacher_join', { room: currentState.classCode });
+
+                // Signal to students
+                socket.emit('class_started', { room: currentState.classCode });
+
+                // Re-sync with any students already in the room
+                console.log("DEBUG: Requesting sync for existing students (Resume)...");
+                socket.emit('request_sync', { room: currentState.classCode });
+            } catch (e) {
+                console.error("Resume Error", e);
+                localStorage.removeItem('isSessionActive');
+            }
+        }
+
+        // Run on load
+        window.addEventListener('load', initPersistence);
+
+    </script>
+</body>
+
+</html>

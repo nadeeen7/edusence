@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edusence - Intelligent Monitoring System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0D0D0D;
+            color: white;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #8A2BE2, #3A7AFE);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .premium-card {
+            background: #1A1A1A;
+            border: 1px solid #333333;
+            transition: all 0.3s ease;
+        }
+
+        .premium-card:hover {
+            border-color: #8A2BE2;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px -10px rgba(138, 43, 226, 0.2);
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex flex-col">
+
+    <!-- Navbar -->
+    <nav class="sticky top-0 z-50 bg-[#0D0D0D]/80 backdrop-blur-xl border-b border-[#333333]">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+            <a href="home.html" class="text-xl font-bold flex items-center gap-2">
+                <span class="text-2xl">🎓</span>
+                <span class="gradient-text tracking-tight">Edusence</span>
+            </a>
+
+            <div class="hidden md:flex items-center gap-6">
+                <!-- <a href="#features" class="text-sm text-[#B3B3B3] hover:text-white transition">Features</a>
+                <a href="#how-it-works" class="text-sm text-[#B3B3B3] hover:text-white transition">How it Works</a> -->
+                <div class="flex items-center gap-3">
+                    <a href="student_login.html"
+                        class="text-sm font-medium text-white hover:text-[#3A7AFE] transition">Student Login</a>
+                    <a href="teacher_login.html"
+                        class="px-5 py-2 text-sm font-bold bg-white text-black hover:bg-slate-200 rounded-full transition">Teacher
+                        Login</a>
+                </div>
+            </div>
+
+            <!-- Mobile Menu Button -->
+            <button id="mobileMenuBtn" class="md:hidden text-white p-2">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16">
+                    </path>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Mobile Menu -->
+        <div id="mobileMenuContent" class="hidden md:hidden border-t border-[#333333] bg-[#0D0D0D]">
+            <div class="px-6 py-4 space-y-4">
+                <a href="student_login.html" class="block text-sm text-[#B3B3B3]">Student Login</a>
+                <a href="teacher_login.html" class="block text-sm text-[#3A7AFE] font-bold">Teacher Login</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <main class="flex-grow">
+        <section class="relative max-w-7xl mx-auto px-6 py-32 md:py-48 text-center overflow-hidden">
+            <!-- Ambient Background Glow -->
+            <div
+                class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-purple-600/20 rounded-full blur-[120px] -z-10 pointer-events-none">
+            </div>
+
+            <div
+                class="inline-flex items-center gap-2 px-3 py-1 mb-8 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-purple-200 backdrop-blur-sm">
+                <span class="flex h-2 w-2 rounded-full bg-purple-400 animate-pulse"></span>
+                Where Education Meets Intelligence.
+            </div>
+
+            <h1 class="text-5xl md:text-8xl font-bold mb-8 leading-tight tracking-tight">
+                Next-Generation <br>
+                <span class="gradient-text">Classroom Intelligence.</span>
+            </h1>
+
+            <p class="text-lg md:text-2xl text-slate-400 max-w-3xl mx-auto mb-12 leading-relaxed font-light">
+                Edusence is the premier platform for measuring student engagement. We utilize state-of-the-art computer
+                vision to provide actionable insights, enabling educators to deliver impactful learning experiences.
+                <span class="text-slate-300">Secure. Scalable. Precise.</span>
+            </p>
+
+            <div class="flex flex-col sm:flex-row justify-center gap-6">
+                <a href="register.html"
+                    class="group relative px-8 py-4 bg-white text-black hover:bg-slate-100 rounded-xl font-bold text-lg transition-all shadow-[0_0_40px_-10px_rgba(255,255,255,0.3)] hover:shadow-[0_0_40px_-5px_rgba(255,255,255,0.5)] hover:-translate-y-1">
+                    Launch Educator Portal
+                    <span
+                        class="absolute inset-0 rounded-xl ring-2 ring-white/20 group-hover:ring-white/40 transition-all"></span>
+                </a>
+                <a href="#how-it-works"
+                    class="px-8 py-4 bg-transparent hover:bg-white/5 border border-white/10 text-white rounded-xl font-medium text-lg transition-all hover:-translate-y-1">
+                    Platform Overview
+                </a>
+            </div>
+        </section>
+
+        <!-- Value Props (Replaces Live Demo) -->
+        <section class="bg-[#ODODOD] py-20 border-y border-[#1A1A1A]">
+            <div class="max-w-7xl mx-auto px-6">
+                <div class="grid md:grid-cols-3 gap-8">
+                    <!-- Feature 1 -->
+                    <div class="premium-card p-8 rounded-2xl">
+                        <div
+                            class="w-12 h-12 bg-[#1A1A1A] rounded-xl flex items-center justify-center mb-6 text-2xl border border-[#333333]">
+                            📊
+                        </div>
+                        <h3 class="text-xl font-bold mb-3">Behavioral Analytics</h3>
+                        <p class="text-[#B3B3B3] leading-relaxed">
+                            Granular attention metrics derived from non-intrusive facial landmarks, providing a
+                            comprehensive view of classroom engagement.
+                        </p>
+                    </div>
+
+                    <!-- Feature 2 -->
+                    <div class="premium-card p-8 rounded-2xl">
+                        <div
+                            class="w-12 h-12 bg-[#1A1A1A] rounded-xl flex items-center justify-center mb-6 text-2xl border border-[#333333]">
+                            🔒
+                        </div>
+                        <h3 class="text-xl font-bold mb-3">Privacy-Centric Design</h3>
+                        <p class="text-[#B3B3B3] leading-relaxed">
+                            Engineered with strict data governance. We process analytics locally where possible,
+                            ensuring student privacy and regulatory compliance.
+                        </p>
+                    </div>
+
+                    <!-- Feature 3 -->
+                    <div class="premium-card p-8 rounded-2xl">
+                        <div
+                            class="w-12 h-12 bg-[#1A1A1A] rounded-xl flex items-center justify-center mb-6 text-2xl border border-[#333333]">
+                            ⚡
+                        </div>
+                        <h3 class="text-xl font-bold mb-3">Proactive Interventions</h3>
+                        <p class="text-[#B3B3B3] leading-relaxed">
+                            Real-time latency-free alerts enable educators to identify learning gaps and re-engage
+                            students the moment attention wanes.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Steps Section used to be How It Works -->
+        <section id="how-it-works" class="py-24 max-w-7xl mx-auto px-6">
+            <h2 class="text-3xl font-bold text-center mb-16">Deployment Workflow</h2>
+
+            <div class="relative">
+                <!-- Connector Line -->
+                <div
+                    class="hidden md:block absolute top-12 left-0 w-full h-0.5 bg-gradient-to-r from-[#8A2BE2]/20 via-[#3A7AFE]/20 to-[#8A2BE2]/20">
+                </div>
+
+                <div class="grid md:grid-cols-3 gap-12 relative z-10">
+                    <div class="text-center">
+                        <div
+                            class="w-24 h-24 mx-auto bg-[#0D0D0D] border-4 border-[#1A1A1A] rounded-full flex items-center justify-center text-3xl font-bold text-[#8A2BE2] mb-6 shadow-xl">
+                            1
+                        </div>
+                        <h3 class="text-xl font-bold mb-2">Institution Registration</h3>
+                        <p class="text-[#B3B3B3]">Educators provision secure classroom environments via the
+                            administrative portal.</p>
+                    </div>
+                    <div class="text-center">
+                        <div
+                            class="w-24 h-24 mx-auto bg-[#0D0D0D] border-4 border-[#1A1A1A] rounded-full flex items-center justify-center text-3xl font-bold text-[#3A7AFE] mb-6 shadow-xl">
+                            2
+                        </div>
+                        <h3 class="text-xl font-bold mb-2">Seamless Onboarding</h3>
+                        <p class="text-[#B3B3B3]">Students authenticate via secure links with automatic device
+                            compatibility checks.</p>
+                    </div>
+                    <div class="text-center">
+                        <div
+                            class="w-24 h-24 mx-auto bg-[#0D0D0D] border-4 border-[#1A1A1A] rounded-full flex items-center justify-center text-3xl font-bold text-[#8A2BE2] mb-6 shadow-xl">
+                            3
+                        </div>
+                        <div class="absolute right-0 top-0"></div> <!-- Spacer -->
+                        <h3 class="text-xl font-bold mb-2">Analytics Dashboard</h3>
+                        <p class="text-[#B3B3B3]">Visualize engagement trends and receive automated reports on class
+                            performance.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- CTA Section -->
+        <section class="py-20 bg-gradient-to-b from-[#0D0D0D] to-[#1A1A1A]/50">
+            <div class="max-w-4xl mx-auto px-6 text-center">
+                <h2 class="text-4xl font-bold mb-6">Ready to upgrade your teaching?</h2>
+                <div class="flex flex-col sm:flex-row justify-center gap-4 mt-8">
+                    <a href="register.html"
+                        class="px-8 py-3 bg-white text-black hover:bg-slate-200 rounded-full font-bold text-lg transition">
+                        Start for Free
+                    </a>
+                </div>
+            </div>
+        </section>
+        </section>
+
+        <!-- FAQ / Help Section -->
+        <section class="py-20 max-w-4xl mx-auto px-6">
+            <h2 class="text-3xl font-bold text-center mb-12">Frequently Asked Questions</h2>
+
+            <div class="space-y-4">
+                <!-- FAQ Item 1 -->
+                <div class="bg-[#1A1A1A] border border-[#333333] rounded-xl overflow-hidden">
+                    <button
+                        class="w-full px-6 py-4 text-left font-bold flex justify-between items-center focus:outline-none"
+                        onclick="toggleFaq(this)">
+                        <span>How do I register as a teacher?</span>
+                        <span class="text-[#3A7AFE] transform transition-transform duration-200">▼</span>
+                    </button>
+                    <div class="hidden px-6 pb-4 text-[#B3B3B3] text-sm leading-relaxed">
+                        Click the "Teacher Login" button and select "Create Teacher Account". Fill in your school
+                        details and credentials to get instant access to the dashboard.
+                    </div>
+                </div>
+
+                <!-- FAQ Item 2 -->
+                <div class="bg-[#1A1A1A] border border-[#333333] rounded-xl overflow-hidden">
+                    <button
+                        class="w-full px-6 py-4 text-left font-bold flex justify-between items-center focus:outline-none"
+                        onclick="toggleFaq(this)">
+                        <span>Is it free for students?</span>
+                        <span class="text-[#3A7AFE] transform transition-transform duration-200">▼</span>
+                    </button>
+                    <div class="hidden px-6 pb-4 text-[#B3B3B3] text-sm leading-relaxed">
+                        Yes! Students can join sessions for free. They just need the Class Link or Class Code provided
+                        by their teacher.
+                    </div>
+                </div>
+
+                <!-- FAQ Item 3 -->
+                <div class="bg-[#1A1A1A] border border-[#333333] rounded-xl overflow-hidden">
+                    <button
+                        class="w-full px-6 py-4 text-left font-bold flex justify-between items-center focus:outline-none"
+                        onclick="toggleFaq(this)">
+                        <span>My camera isn't working, what should I do?</span>
+                        <span class="text-[#3A7AFE] transform transition-transform duration-200">▼</span>
+                    </button>
+                    <div class="hidden px-6 pb-4 text-[#B3B3B3] text-sm leading-relaxed">
+                        Ensure you have granted browser permissions for the camera. Refresh the page and click "Allow"
+                        when prompted. Check your system settings if the issue persists.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-[#0D0D0D] border-t border-[#333333] py-12">
+        <div
+            class="max-w-7xl mx-auto px-6 text-center md:text-left flex flex-col md:flex-row justify-between items-center text-[#B3B3B3]">
+            <div class="mb-4 md:mb-0">
+                <span class="font-bold text-white">Edusence</span>
+                <span class="mx-2 text-[#333333]">|</span>
+                <span class="text-sm">Where Education Meets Intelligence.</span>
+            </div>
+            <div class="text-sm">
+                &copy; 2025 Edusence. System Secure.
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+        const mobileMenuContent = document.getElementById('mobileMenuContent');
+
+        mobileMenuBtn.addEventListener('click', function () {
+            mobileMenuContent.classList.toggle('hidden');
+        });
+
+        function toggleFaq(button) {
+            const content = button.nextElementSibling;
+            const arrow = button.querySelector('span:last-child');
+
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                arrow.style.transform = 'rotate(180deg)';
+            } else {
+                content.classList.add('hidden');
+                arrow.style.transform = 'rotate(0deg)';
+            }
+        }
+    </script>
+</body>
+
+</html>

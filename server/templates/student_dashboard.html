@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Dashboard - Edusence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+
+<body class="bg-[#0D0D0D] text-white min-h-screen flex flex-col">
+
+    <!-- Navbar -->
+    <nav class="bg-[#1A1A1A]/80 backdrop-blur-xl border-b border-[#333333] sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-8 h-8 rounded bg-gradient-to-br from-[#8A2BE2] to-[#3A7AFE] flex items-center justify-center text-white font-bold text-sm">
+                    AI
+                </div>
+                <span
+                    class="text-xl font-bold bg-gradient-to-r from-[#8A2BE2] to-[#3A7AFE] bg-clip-text text-transparent">
+                    Classroom
+                </span>
+            </div>
+            <div class="flex items-center gap-4">
+                <span id="userName" class="text-[#B3B3B3] text-sm hidden md:block"></span>
+                <button onclick="window.location.href='/'"
+                    class="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md transition-all">
+                    Exit
+                </button>
+                <button onclick="logout()"
+                    class="px-3 py-1.5 text-xs font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-md transition-all">
+                    Logout
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-grow flex items-center justify-center p-6">
+        <div class="max-w-md w-full">
+
+            <div class="text-center mb-10">
+                <h1 class="text-3xl md:text-4xl font-bold text-white mb-2">Join a Class</h1>
+                <p class="text-slate-400">Enter the meeting code or link to start learning</p>
+            </div>
+
+            <div
+                class="bg-[#1A1A1A] backdrop-blur-md border border-[#333333] rounded-2xl p-6 md:p-8 shadow-xl relative overflow-hidden">
+                <!-- Decorative glow -->
+                <div class="absolute -top-20 -right-20 w-64 h-64 bg-[#8A2BE2]/10 rounded-full blur-3xl"></div>
+                <div class="absolute -bottom-20 -left-20 w-64 h-64 bg-[#3A7AFE]/10 rounded-full blur-3xl"></div>
+
+                <form id="joinForm" class="relative z-10 space-y-6">
+                    <div>
+                        <label class="block text-sm font-medium text-[#B3B3B3] mb-2">Meeting Link or Code</label>
+                        <div class="relative">
+                            <input type="text" id="classLink" placeholder="Enter class link..."
+                                class="w-full pl-10 pr-4 py-3 bg-[#0D0D0D] border border-[#333333] rounded-xl focus:outline-none focus:border-[#8A2BE2] focus:ring-1 focus:ring-[#8A2BE2] transition-all text-white placeholder-[#666666]"
+                                required />
+                            <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
+                                🔗
+                            </div>
+                        </div>
+                        <p id="errorMsg" class="text-red-400 text-xs mt-2 hidden">Please enter a valid link</p>
+                    </div>
+
+                    <button type="submit"
+                        class="w-full py-3.5 bg-gradient-to-r from-[#8A2BE2] to-[#3A7AFE] hover:from-[#7B1FA2] hover:to-[#2962FF] rounded-xl font-semibold text-white shadow-lg shadow-cyan-900/20 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2">
+                        <span>Join Session</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd"
+                                d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </form>
+
+                <div class="mt-8 pt-6 border-t border-slate-800/50 text-center">
+                    <p class="text-xs text-slate-500">
+                        By joining, you agree to share your camera feed for automated attention monitoring.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="py-6 text-center text-slate-600 text-sm">
+        <p>&copy; 2025 Edusence. All rights reserved.</p>
+    </footer>
+
+    <script>
+        // Check authentication
+        const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+        if (!userInfo.id) {
+            window.location.href = 'student_login.html';
+        } else {
+            document.getElementById('userName').textContent = `Hi, ${userInfo.name}`;
+        }
+
+        // Auto-fill class code from URL parameter & handle errors
+        const urlParams = new URLSearchParams(window.location.search);
+        const classCode = urlParams.get('code');
+        const error = urlParams.get('error');
+        const classLinkInput = document.getElementById('classLink');
+        const errorMsg = document.getElementById('errorMsg');
+
+        if (classCode) {
+            classLinkInput.value = classCode;
+        }
+
+        if (error === 'invalid_room') {
+            errorMsg.textContent = 'Invalid Room ID. Please check the Room ID and try again.';
+            errorMsg.classList.remove('hidden');
+            classLinkInput.classList.add('border-red-500', 'ring-1', 'ring-red-500');
+        }
+
+        // Reset error state on input
+        classLinkInput.addEventListener('input', () => {
+            console.log("DEBUG: User typing... clearing errors");
+            errorMsg.classList.add('hidden');
+            classLinkInput.classList.remove('border-red-500', 'ring-1', 'ring-red-500');
+        });
+
+        function logout() {
+            localStorage.removeItem('user_info');
+            window.location.href = 'student_login.html';
+        }
+
+        document.getElementById('joinForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const link = classLinkInput.value.trim();
+
+            // Basic presence validation
+            if (!link) {
+                errorMsg.textContent = 'Please enter a class code';
+                errorMsg.classList.remove('hidden');
+                classLinkInput.classList.add('border-red-500', 'ring-1', 'ring-red-500');
+                return;
+            }
+
+            errorMsg.classList.add('hidden');
+            classLinkInput.classList.remove('border-red-500', 'ring-1', 'ring-red-500');
+
+            // Showing a loading state
+            const btn = this.querySelector('button');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span>Validating...</span>';
+            btn.disabled = true;
+
+            const finalCode = link.toUpperCase();
+            console.log(`DEBUG: Attempting to join room: ${finalCode}`);
+
+            try {
+                // Backend validation check
+                const response = await fetch(`/api/validate_room?code=${finalCode}`);
+                console.log(`DEBUG: Backend response status: ${response.status}`);
+
+                const data = await response.json();
+                console.log("DEBUG: Backend response data:", data);
+
+                if (response.status === 200 && data.valid) {
+                    console.log("DEBUG: Room is valid or found in memory. Redirecting...");
+                    btn.innerHTML = '<span>Connecting...</span>';
+                    // Store the room code and redirect
+                    localStorage.setItem('active_class_code', finalCode);
+                    setTimeout(() => {
+                        window.location.href = `/student/classroom?code=${finalCode}`;
+                    }, 500);
+                } else if (response.status === 404) {
+                    console.log("DEBUG: Room not found (404)");
+                    errorMsg.textContent = data.message || 'Invalid Room ID. Please check the Room ID and try again.';
+                    errorMsg.classList.remove('hidden');
+                    classLinkInput.classList.add('border-red-500', 'ring-1', 'ring-red-500');
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                } else {
+                    console.error("DEBUG: Unexpected response status:", response.status);
+                    errorMsg.textContent = data.message || 'Validation failed. Please check the code and try again.';
+                    errorMsg.classList.remove('hidden');
+                    classLinkInput.classList.add('border-red-500', 'ring-1', 'ring-red-500');
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                console.error('DEBUG: Validation error:', err);
+                errorMsg.textContent = 'Connection error. Please try again later.';
+                errorMsg.classList.remove('hidden');
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        });
+    </script>
+</body>
+
+</html>
