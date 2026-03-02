@@ -43,7 +43,10 @@ def token_required(f):
             role = data['role']
             
             if role == 'teacher':
-                current_user = Teacher.query.get(int(user_id))
+                try:
+                    current_user = Teacher.query.get(int(user_id))
+                except (ValueError, TypeError):
+                    return jsonify({'message': 'Invalid teacher ID format'}), 401
             else:
                 current_user = Student.query.get(user_id)
                 

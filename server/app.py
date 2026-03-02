@@ -22,7 +22,14 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 # Initialize Extensions
-CORS(app, supports_credentials=True, origins=app.config['CORS_ORIGINS'])
+origins = [
+    app.config.get('FRONTEND_URL', 'http://localhost:5173'),
+    'http://127.0.0.1:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5174'
+]
+
+CORS(app, supports_credentials=True, origins=origins)
 db.init_app(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
@@ -49,8 +56,9 @@ def register():
     """Register student or teacher with hashed password"""
     try:
         data = request.json
+        print(f"Registration Attempt: {data}")
         name = data.get('name')
-        email = data.get('email')
+        email = data.get('email', '').strip().lower()
         password = data.get('password')
         role = data.get('role', 'student')
 
@@ -80,7 +88,7 @@ def login():
     """Universal login returning JWT"""
     try:
         data = request.json
-        email = data.get('email')
+        email = data.get('email', '').strip().lower()
         password = data.get('password')
         role = data.get('role', 'student')
 
@@ -103,6 +111,16 @@ def login():
                 }
             }), 200
         
+        # New: Check if the email exists for the OTHER role to provide a helpful error
+        other_role = 'student' if role == 'teacher' else 'teacher'
+        other_user = Student.query.filter_by(email=email).first() if role == 'teacher' else Teacher.query.filter_by(email=email).first()
+        
+        if other_user:
+            return jsonify({
+                'success': False, 
+                'message': f'This email is registered as a {other_role}. Please use the {other_role} login portal.'
+            }), 401
+            
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -313,28 +331,56 @@ def handle_join_room(data):
 @socketio.on('attention-update')
 def handle_attention_update(data):
     room = data.get('room')
-    student_id = data.get('student_id') or data.get('userId')
+    student_id = data.get('student_id')
     attention = data.get('attention', 0)
-    status = data.get('status', 'Focused')
-    student_name = data.get('student_name')
+    status = data.get('status', 'Unknown')
     
-    if not room or not student_id: return
-    
-    if room in classroom_sessions and student_id in classroom_sessions[room]["students"]:
-        s_data = classroom_sessions[room]["students"][student_id]
-        s_data.update({"attention": attention, "status": status})
-        
-        # Broadcast individual update for efficiency
+    if room in classroom_sessions:
+        if student_id not in classroom_sessions[room]['students']:
+            classroom_sessions[room]['students'][student_id] = {
+                'name': data.get('student_name', 'Unknown'),
+                'attention': attention,
+                'status': status,
+                'connected': True,
+                'last_seen': datetime.now(),
+                'hand_raised': False
+            }
+        else:
+            student = classroom_sessions[room]['students'][student_id]
+            student['attention'] = attention
+            student['status'] = status
+            student['last_seen'] = datetime.now()
+            student['connected'] = True
+
+        # Broadcast update to teacher
         emit('attention-update', {
             'student_id': student_id,
-            'userId': student_id,
             'attention': attention,
             'status': status,
-            'student_name': student_name or s_data.get('name')
-        }, room=room, include_self=False)
+            'hand_raised': classroom_sessions[room]['students'][student_id].get('hand_raised', False)
+        }, room=room)
         
-        recalculate_and_broadcast_stats(room)
-        log_attention_to_db(student_id, attention, room, status=status)
+        # Broadcast dashboard stats
+        broadcast_dashboard_update(room)
+
+@socketio.on('raise_hand')
+def handle_raise_hand(data):
+    room = data.get('room')
+    student_id = data.get('student_id')
+    is_raised = data.get('is_raised', True)
+    
+    if room in classroom_sessions and student_id in classroom_sessions[room]['students']:
+        classroom_sessions[room]['students'][student_id]['hand_raised'] = is_raised
+        
+        # Notify teacher
+        emit('student_raised_hand', {
+            'student_id': student_id,
+            'student_name': classroom_sessions[room]['students'][student_id]['name'],
+            'is_raised': is_raised
+        }, room=room)
+        
+        print(f"[INFO] Student {student_id} {'raised' if is_raised else 'lowered'} hand in {room}")
+        broadcast_dashboard_update(room)
 
 @socketio.on('request_sync')
 def handle_request_sync(data):
@@ -345,12 +391,18 @@ def handle_request_sync(data):
 @socketio.on('kick_student')
 def handle_kick(data):
     room = data.get('room')
-    sid_to_kick = data.get('student_id')
-    if room and sid_to_kick:
-        emit('kicked', {'message': 'You have been removed.'}, room=room) # In realistic apps, use direct SID
-        # Note: In this simple implementation, we broadcast 'kicked' to the room, 
-        # but the client-side 'kicked' listener will check if it was them.
-        # Ideally: socketio.emit('kicked', room=specific_sid)
+    student_id = data.get('student_id')
+    if room and student_id:
+        # Find the specific SID for this student_id in this room
+        target_sid = None
+        for sid, info in connected_students.items():
+            if info['student_id'] == student_id and info['room'] == room:
+                target_sid = sid
+                break
+        
+        if target_sid:
+            emit('kicked', {'message': 'You have been removed.'}, room=target_sid)
+            print(f"[INFO] Student {student_id} kicked from room {room}")
 
 @socketio.on('end_class')
 @socketio.on('end_session')
@@ -358,15 +410,22 @@ def handle_end_class(data):
     room = data.get('room')
     if not room: return
     try:
-        MonitoringSession.query.filter_by(room_code=room, end_time=None).update({"end_time": db.func.current_timestamp()})
+        # Update both monitoring sessions and meeting links
+        MonitoringSession.query.filter_by(room_code=room, end_time=None).update({
+            "end_time": db.func.current_timestamp()
+        })
         MeetingLink.query.filter_by(link_code=room).update({"is_active": False})
         db.session.commit()
+        
         if room in classroom_sessions:
             classroom_sessions[room]["active"] = False
+            
+        # Unified event broadcast
         socketio.emit('class_ended', {'message': 'Class has ended.'}, room=room)
-        socketio.emit('session_ended', {'message': 'Class has ended.'}, room=room)
+        print(f"[INFO] Room {room} ended by teacher")
     except Exception as e:
         db.session.rollback()
+        print(f"[ERROR] Failed to end class {room}: {str(e)}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -453,4 +512,4 @@ def log_attention_to_db(student_id, score, room, status=None):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    socketio.run(app, debug=False, host='0.0.0.0', port=5000)

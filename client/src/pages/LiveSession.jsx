@@ -30,6 +30,14 @@ const StudentVideo = React.memo(({ student, stream }) => {
                 </div>
             )}
 
+            <div className="absolute top-2 left-2 z-30">
+                {student.hand_raised && (
+                    <div className="bg-yellow-500 text-black p-1.5 rounded-full shadow-lg animate-bounce border-2 border-white">
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1v3a1 1 0 01-1 1h-3v1a1 1 0 01-2 0v-1H6a1 1 0 01-1-1v-3H4a1 1 0 01-1-1V5a1 1 0 011-1h3V3a1 1 0 011-1h2z"></path></svg>
+                    </div>
+                )}
+            </div>
+
             <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 text-white">
                 <div className={`w-2 h-2 rounded-full ${attn < 40 ? 'bg-red-500' : attn < 70 ? 'bg-yellow-500' : 'bg-green-500 animate-pulse'}`}></div>
                 <span className="text-[10px] font-black">{Math.round(attn)}%</span>
@@ -126,11 +134,12 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
         if (hasTeacherStream && teacherStream) {
             teacherStreamRef.current = teacherStream;
             if (teacherVideoRef.current && teacherVideoRef.current.srcObject !== teacherStream) {
+                console.log("Teacher stream attaching/re-attaching to video element (ViewMode:", viewMode, ")");
                 teacherVideoRef.current.srcObject = teacherStream;
-                console.log("Teacher stream attached to video element");
+                teacherVideoRef.current.play().catch(e => console.warn("Teacher video play error:", e));
             }
         }
-    }, [hasTeacherStream, teacherStream]);
+    }, [hasTeacherStream, teacherStream, viewMode]);
 
     // 2. Socket Management
     const { connected, emit, on } = useSocketSession(roomCode, user, 'teacher');
@@ -161,7 +170,12 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
         });
         pcRefs.current[studentId] = pc;
 
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        if (localStream) {
+            console.log("Adding teacher tracks to peer connection for:", studentId);
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        } else {
+            console.warn("Initiating call without teacher stream for:", studentId);
+        }
 
         pc.ontrack = (event) => {
             console.log("Teacher received track from:", studentId);
@@ -222,12 +236,22 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 const idx = prev.findIndex(s => s.id === sid);
                 if (idx !== -1) {
                     const next = [...prev];
-                    next[idx] = { ...next[idx], attention: data.attention, status: data.status };
+                    next[idx] = { ...next[idx], attention: data.attention, status: data.status, hand_raised: data.hand_raised };
                     return next;
                 } else {
-                    return [...prev, { id: sid, name: data.student_name || 'Student', attention: data.attention, status: data.status }];
+                    return [...prev, { id: sid, name: data.student_name || 'Student', attention: data.attention, status: data.status, hand_raised: data.hand_raised }];
                 }
             });
+        });
+
+        on('student_raised_hand', (data) => {
+            setNotification({
+                type: data.is_raised ? 'info' : 'success',
+                message: `${data.student_name} ${data.is_raised ? 'raised their hand' : 'lowered their hand'}`
+            });
+            setActiveStudents(prev => prev.map(s =>
+                s.id === data.student_id ? { ...s, hand_raised: data.is_raised } : s
+            ));
         });
 
         on('dashboard_update', (data) => {
@@ -265,13 +289,19 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
         });
 
         return () => {
-            Object.values(pcRefs.current).forEach(pc => pc.close());
+            console.log("Cleaning up LiveSession - closing all PeerConnections");
+            Object.values(pcRefs.current).forEach(pc => {
+                console.log(`Closing PC for student, last state: ${pc.connectionState}`);
+                pc.close();
+            });
+            pcRefs.current = {};
         };
     }, [connected, emit, on, roomCode, initiateCall]);
 
     const handleEndClass = () => {
         if (window.confirm("End this class for everyone?")) {
-            emit('end_session', { room: roomCode });
+            console.log("Teacher ending class...");
+            emit('end_class', { room: roomCode });
             onExit();
         }
     };
@@ -322,8 +352,10 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
 
                 <div className="flex items-center gap-3">
                     <div className="hidden md:flex flex-col items-end mr-2">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase">Attention Average</span>
-                        <span className={`text-sm font-black ${stats.classAvg < 60 ? 'text-red-400' : 'text-blue-400'}`}>{stats.classAvg}%</span>
+                        <span className="text-[10px] font-bold text-slate-400">Class Average</span>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-3xl font-black text-white">{stats.classAvg}%</span>
+                        </div>
                     </div>
                     <button onClick={handleEndClass} className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 px-4 py-2 rounded-lg text-xs font-black uppercase transition-all">End Class</button>
                 </div>
@@ -362,8 +394,11 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                                     {activeStudents.map(student => (
                                         <tr key={student.id} className="hover:bg-slate-800/20 transition-all">
                                             <td className="px-6 py-4 flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-xs uppercase text-slate-300">
+                                                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-xs uppercase text-slate-300 relative">
                                                     {student.name ? student.name[0] : '?'}
+                                                    {student.hand_raised && (
+                                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-500 rounded-full border-2 border-slate-900"></div>
+                                                    )}
                                                 </div>
                                                 <span className="font-bold">{student.name}</span>
                                             </td>

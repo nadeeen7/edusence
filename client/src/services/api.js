@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000',
+    baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000',
     withCredentials: true,
     timeout: 10000,
     headers: {
@@ -28,15 +28,17 @@ api.interceptors.response.use(
         return response;
     },
     error => {
-        const message = error.response?.data?.message || 'Server connection failed';
-        console.error(`API Error: ${message}`, error);
+        const message = error.response?.data?.message || error.message || 'Server connection failed';
+        console.error(`API Error details:`, {
+            status: error.response?.status,
+            data: error.response?.data,
+            message: error.message,
+            url: error.config?.url
+        });
 
-        // You could trigger a global toast/notification here
-        if (error.response?.status === 401) {
-            // Handle unauthorized (redirect to login)
-            // window.location.href = '/';
+        if (!error.response) {
+            alert(`Network Error: ${message}. Check server status.`);
         }
-
         return Promise.reject(error);
     }
 );

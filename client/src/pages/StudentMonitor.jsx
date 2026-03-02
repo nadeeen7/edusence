@@ -18,6 +18,7 @@ const StudentMonitor = () => {
     const [isWarning, setIsWarning] = useState(false);
     const [teacherStream, setTeacherStream] = useState(null);
     const [endBanner, setEndBanner] = useState(null); // Non-blocking session end notification
+    const [handRaised, setHandRaised] = useState(false);
 
     const pcRef = useRef(null);
     const faceMeshRef = useRef(null);
@@ -27,8 +28,7 @@ const StudentMonitor = () => {
     const lastEmitRef = useRef(0);
     const attentionHistoryRef = useRef([]);
     const studentStreamRef = useRef(null);
-
-
+    const tracksAddedRef = useRef(false);
 
     // 1. Media Management (Mandatory Cleanup handled by hook)
     const {
@@ -43,6 +43,12 @@ const StudentMonitor = () => {
 
     // 2. Socket Management (Empty dependency array optimization in hook)
     const { connected, emit, on } = useSocketSession(roomCode, user, 'student');
+
+    const toggleHand = () => {
+        const newState = !handRaised;
+        setHandRaised(newState);
+        emit('raise_hand', { room: roomCode, student_id: user.id, is_raised: newState });
+    };
 
     const onFaceResults = useCallback((results) => {
         let score = 0;
@@ -64,6 +70,10 @@ const StudentMonitor = () => {
             else if (pitch < -0.15) { score = 50; status = "Looking Up"; }
         }
 
+        if (score === 0) {
+            console.warn("Attention score is 0 - Face not detected or MediaPipe failing");
+        }
+
         attentionHistoryRef.current.push(score);
         if (attentionHistoryRef.current.length > 5) attentionHistoryRef.current.shift();
         const smoothed = Math.round(attentionHistoryRef.current.reduce((a, b) => a + b) / attentionHistoryRef.current.length);
@@ -73,17 +83,18 @@ const StudentMonitor = () => {
 
         const now = Date.now();
         if (now - lastEmitRef.current > 2000 && connected) {
+            console.log(`[ML] Emitting focus data: ${smoothed}% (${status})`);
             emit('attention-update', {
                 userId: user.id,
                 student_id: user.id,
                 room: roomCode,
                 attention: smoothed,
                 status: status,
-                student_name: user.name
+                student_name: user?.name
             });
             lastEmitRef.current = now;
         }
-    }, [connected, roomCode, user.id, user.name, emit]);
+    }, [connected, roomCode, user, emit]);
 
     const initML = useCallback(async () => {
         if (faceMeshRef.current || mlLoopRef.current) return;
@@ -99,7 +110,7 @@ const StudentMonitor = () => {
 
         const loaded = await waitForFaceMesh();
         if (!loaded) {
-            setStatusMessage("Attention model unavailable");
+            console.warn("Attention model unavailable");
             return;
         }
 
@@ -113,18 +124,25 @@ const StudentMonitor = () => {
         faceMeshRef.current = faceMesh;
 
         mlLoopRef.current = window.setInterval(async () => {
-            if (!faceMeshRef.current) return;
-            if (hiddenVideoRef.current && hiddenVideoRef.current.readyState >= 2) {
+            if (!faceMeshRef.current || !hiddenVideoRef.current) return;
+
+            const vid = hiddenVideoRef.current;
+            if (vid.readyState >= 2) {
                 try {
-                    await faceMesh.send({ image: hiddenVideoRef.current });
+                    // Diagnostic logging for frame flow - only every 10 frames to avoid spam
+                    if (Math.random() < 0.1) {
+                        console.log(`[ML] Frame Check: ${vid.videoWidth}x${vid.videoHeight}, ready=${vid.readyState}`);
+                    }
+                    await faceMesh.send({ image: vid });
                 } catch (e) {
                     console.error("ML processing failed:", e);
                 }
+            } else {
+                // If video is stalled, try to kickstart it
+                if (vid.paused) vid.play().catch(() => { });
             }
         }, 500);
     }, [onFaceResults]);
-
-    const tracksAddedRef = useRef(false);
 
     // Sync local studentStream to Ref and Video Elements
     useEffect(() => {
@@ -137,7 +155,7 @@ const StudentMonitor = () => {
             });
 
             if (pcRef.current && !tracksAddedRef.current) {
-                console.log("Adding student tracks to existing PC...");
+                console.log("Adding student tracks to existing PC (Post-Stream Load)...");
                 studentStream.getTracks().forEach(track => {
                     pcRef.current.addTrack(track, studentStream);
                 });
@@ -145,6 +163,14 @@ const StudentMonitor = () => {
             }
         }
     }, [hasStudentStream, studentStream]);
+
+    // Initial media setup
+    useEffect(() => {
+        if (!studentStreamRef.current) {
+            console.log("Starting camera on mount...");
+            startStream();
+        }
+    }, [startStream]);
 
     useEffect(() => {
         if (!user || !roomCode) {
@@ -161,13 +187,6 @@ const StudentMonitor = () => {
                     return;
                 }
 
-                if (!studentStreamRef.current) {
-                    const stream = await startStream();
-                    if (stream && hiddenVideoRef.current) {
-                        hiddenVideoRef.current.srcObject = stream;
-                    }
-                }
-
                 if (connected) {
                     setStatusMessage("Connected to Live Class");
                     initML();
@@ -180,8 +199,8 @@ const StudentMonitor = () => {
             }
         };
 
-        if (connected) init();
-    }, [connected, roomCode, user, navigate, startStream, initML]);
+        init();
+    }, [connected, roomCode, user, navigate, initML]);
 
     useEffect(() => {
         if (!connected) return;
@@ -194,17 +213,29 @@ const StudentMonitor = () => {
         });
 
         on('teacher_offer', async (data) => {
+            console.log("Teacher offer received, creating student answer...");
             if (pcRef.current) {
                 pcRef.current.close();
                 tracksAddedRef.current = false;
             }
             const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
             pcRef.current = pc;
-            pc.ontrack = (event) => setTeacherStream(event.streams[0]);
+
+            pc.ontrack = (event) => {
+                console.log("Student received teacher track");
+                setTeacherStream(event.streams[0]);
+            };
+
             if (studentStreamRef.current) {
-                studentStreamRef.current.getTracks().forEach(track => pc.addTrack(track, studentStreamRef.current));
+                console.log("Adding local tracks to PC during handshake");
+                studentStreamRef.current.getTracks().forEach(track => {
+                    pc.addTrack(track, studentStreamRef.current);
+                });
                 tracksAddedRef.current = true;
+            } else {
+                console.error("No student stream available for handshake!");
             }
+
             pc.onicecandidate = (event) => {
                 if (event.candidate) emit('ice_candidate', { room: roomCode, student_id: user.id, candidate: event.candidate });
             };
@@ -213,7 +244,10 @@ const StudentMonitor = () => {
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 emit('student_answer', { room: roomCode, student_id: user.id, answer: answer });
-            } catch (err) { console.error("Error creating student answer:", err); }
+                console.log("Student answer sent to teacher");
+            } catch (err) {
+                console.error("Error creating student answer:", err);
+            }
         });
 
         on('ice_candidate', async (data) => {
@@ -224,11 +258,13 @@ const StudentMonitor = () => {
         });
 
         const handleClassEnded = () => {
+            console.log("Class ended notification received");
             setEndBanner("Class has ended. Redirecting...");
-            setTimeout(() => navigate('/student-dashboard'), 3000);
+            setTimeout(() => {
+                navigate('/student-dashboard');
+            }, 3000);
         };
         on('class_ended', handleClassEnded);
-        on('session_ended', handleClassEnded);
         on('kicked', () => {
             setEndBanner("You have been removed from this session.");
             setTimeout(() => navigate('/student-dashboard'), 3000);
@@ -239,11 +275,18 @@ const StudentMonitor = () => {
 
     useEffect(() => {
         return () => {
+            console.log("Cleaning up StudentMonitor - stopping ML loop and FaceMesh");
             if (mlLoopRef.current) {
                 clearInterval(mlLoopRef.current);
                 mlLoopRef.current = null;
             }
-            faceMeshRef.current = null;
+            if (faceMeshRef.current) {
+                faceMeshRef.current = null;
+            }
+            if (pcRef.current) {
+                pcRef.current.close();
+                pcRef.current = null;
+            }
         };
     }, []);
 
@@ -267,22 +310,19 @@ const StudentMonitor = () => {
                     <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
                     <span className="text-[10px] font-black uppercase tracking-widest">{statusMessage}</span>
                 </div>
-                <div className="flex items-center gap-4">
-                    <div className="flex flex-col items-end">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">My Attention</span>
-                        <span className={`text-xs font-black ${isWarning ? 'text-red-400' : 'text-blue-400'}`}>{attentionLevel}%</span>
-                    </div>
+                <div className="text-[10px] font-medium text-slate-500 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
+                    ID: {user?.id}
                 </div>
             </header>
 
             {/* Immersive Main Area */}
-            <main className="flex-1 flex flex-col lg:flex-row p-4 gap-4 overflow-hidden">
+            <main className="flex-1 flex p-4 gap-4 overflow-hidden relative">
                 {/* Large Teacher Video */}
                 <div className="flex-1 bg-black rounded-3xl overflow-hidden relative shadow-2xl border border-white/5 ring-1 ring-white/10 group">
                     <TeacherVideo stream={teacherStream} />
 
                     {/* Floating PIP Local Feed */}
-                    <div className="absolute bottom-6 right-6 w-48 lg:w-64 aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 ring-2 ring-black/50 z-20 group-hover:scale-105 transition-transform duration-500">
+                    <div className="absolute bottom-6 left-6 w-48 lg:w-64 aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 ring-2 ring-black/50 z-20 group-hover:scale-105 transition-transform duration-500">
                         <video
                             ref={previewVideoRef}
                             autoPlay playsInline muted
@@ -296,7 +336,7 @@ const StudentMonitor = () => {
                                 <span className="text-[8px] font-black uppercase text-slate-500">Camera Hidden</span>
                             </div>
                         )}
-                        <div className="absolute top-2 left-2 bg-black/40 backdrop-blur px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-white tracking-widest border border-white/5">Preview</div>
+                        <div className="absolute top-2 left-2 bg-black/40 backdrop-blur px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-white tracking-widest border border-white/5">Local Preview</div>
                     </div>
 
                     {!teacherStream && (
@@ -306,37 +346,6 @@ const StudentMonitor = () => {
                         </div>
                     )}
                 </div>
-
-                {/* Right Side Stats Panel (Optional/Removable for ultra-clean look) */}
-                <aside className="lg:w-80 flex flex-col gap-4">
-                    <Card className="bg-slate-900/50 border-slate-800 p-6 flex-1 flex flex-col items-center justify-center text-center space-y-6">
-                        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Analysis</h3>
-
-                        <div className="relative w-32 h-32">
-                            <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
-                                <circle cx="18" cy="18" r="16" fill="none" className="text-slate-800" stroke="currentColor" strokeWidth="2" />
-                                <circle cx="18" cy="18" r="16" fill="none"
-                                    className={`${isWarning ? 'text-red-500' : 'text-blue-500'} transition-all duration-1000`}
-                                    stroke="currentColor" strokeWidth="2"
-                                    strokeDasharray={`${attentionLevel}, 100`}
-                                    strokeLinecap="round"
-                                />
-                            </svg>
-                            <div className="absolute inset-0 flex items-center justify-center flex-col">
-                                <span className="text-3xl font-black">{attentionLevel}%</span>
-                            </div>
-                        </div>
-
-                        <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.1em] border transition-all ${isWarning ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
-                            {isWarning ? 'Low Attention' : 'Focused'}
-                        </div>
-                    </Card>
-
-                    <Card className="bg-blue-600 border-transparent p-6 text-white text-center shadow-blue-600/20 shadow-2xl">
-                        <h4 className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-2">Class Tip</h4>
-                        <p className="text-xs font-bold leading-relaxed">Stay looking at the teacher for the best score and optimal learning!</p>
-                    </Card>
-                </aside>
             </main>
 
             {/* Bottom Control Bar */}
@@ -346,7 +355,7 @@ const StudentMonitor = () => {
                         onClick={toggleAudio}
                         active={audioEnabled}
                         label={audioEnabled ? 'Mic On' : 'Mic Off'}
-                        icon={audioEnabled ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>}
+                        icon={audioEnabled ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 1v3m0 18v3m8.5-12.5h-3m-13 0h-3m15.89-6.39l-2.12 2.12m-10.77 10.77l-2.12 2.12m10.77-10.77l2.12 2.12M6.34 6.34l-2.12 2.12"></path></svg>}
                     />
 
                     <ControlButton
@@ -354,6 +363,13 @@ const StudentMonitor = () => {
                         active={videoEnabled}
                         label={videoEnabled ? 'Video On' : 'Video Off'}
                         icon={videoEnabled ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>}
+                    />
+
+                    <ControlButton
+                        onClick={toggleHand}
+                        active={handRaised}
+                        label={handRaised ? 'Hand Up' : 'Raise Hand'}
+                        icon={<svg className={`w-5 h-5 ${handRaised ? 'text-yellow-400' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0V12m3 .5V15m0-2.5v-6a1.5 1.5 0 113 0V12m3 .5V15m0-2.5v-6a1.5 1.5 0 113 0V12m-12 0H3a2 2 0 00-2 2v2a2 2 0 002 2h2m13-6h2a2 2 0 012 2v2a2 2 0 01-2 2h-2m-9 4a5 5 0 01-5-5"></path></svg>}
                     />
 
                     <div className="w-px h-8 bg-slate-700 mx-2"></div>
@@ -367,12 +383,25 @@ const StudentMonitor = () => {
                         }}
                         className="bg-red-600 hover:bg-red-500 text-white px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-red-600/20 transition-all border border-red-400/20"
                     >
-                        Leave Class
+                        End Class
                     </button>
                 </div>
             </footer>
 
-            <video ref={hiddenVideoRef} autoPlay playsInline muted className="hidden" />
+            {/* Hidden Video for ML processing - must be technically 'visible' and 'in layout' for some browsers */}
+            <video
+                ref={hiddenVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="opacity-0 pointer-events-none absolute left-0 top-0 z-[-1]"
+                style={{
+                    visibility: 'visible',
+                    width: '160px',
+                    height: '120px',
+                    position: 'fixed'
+                }}
+            />
         </div>
     );
 };
