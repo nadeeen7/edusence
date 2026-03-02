@@ -21,6 +21,7 @@ const StudentMonitor = () => {
 
     const pcRef = useRef(null);
     const faceMeshRef = useRef(null);
+    const mlLoopRef = useRef(null);
     const hiddenVideoRef = useRef(null);
     const previewVideoRef = useRef(null);
     const lastEmitRef = useRef(0);
@@ -74,6 +75,7 @@ const StudentMonitor = () => {
         if (now - lastEmitRef.current > 2000 && connected) {
             emit('attention-update', {
                 userId: user.id,
+                student_id: user.id,
                 room: roomCode,
                 attention: smoothed,
                 status: status,
@@ -84,7 +86,22 @@ const StudentMonitor = () => {
     }, [connected, roomCode, user.id, user.name, emit]);
 
     const initML = useCallback(async () => {
-        if (typeof window.FaceMesh === 'undefined') return;
+        if (faceMeshRef.current || mlLoopRef.current) return;
+
+        const waitForFaceMesh = async (timeoutMs = 15000) => {
+            const startedAt = Date.now();
+            while (typeof window.FaceMesh === 'undefined') {
+                if (Date.now() - startedAt > timeoutMs) return false;
+                await new Promise((resolve) => setTimeout(resolve, 200));
+            }
+            return true;
+        };
+
+        const loaded = await waitForFaceMesh();
+        if (!loaded) {
+            setStatusMessage("Attention model unavailable");
+            return;
+        }
 
         const faceMesh = new window.FaceMesh({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
@@ -95,7 +112,7 @@ const StudentMonitor = () => {
         await faceMesh.initialize();
         faceMeshRef.current = faceMesh;
 
-        const loop = async () => {
+        mlLoopRef.current = window.setInterval(async () => {
             if (!faceMeshRef.current) return;
             if (hiddenVideoRef.current && hiddenVideoRef.current.readyState >= 2) {
                 try {
@@ -104,9 +121,7 @@ const StudentMonitor = () => {
                     console.error("ML processing failed:", e);
                 }
             }
-            setTimeout(loop, 500); // Reduced from 2000ms for smoother tracking
-        };
-        loop();
+        }, 500);
     }, [onFaceResults]);
 
     const tracksAddedRef = useRef(false);
@@ -221,6 +236,16 @@ const StudentMonitor = () => {
 
         return () => { if (pcRef.current) pcRef.current.close(); };
     }, [connected, emit, navigate, on, roomCode, user.id, user.name]);
+
+    useEffect(() => {
+        return () => {
+            if (mlLoopRef.current) {
+                clearInterval(mlLoopRef.current);
+                mlLoopRef.current = null;
+            }
+            faceMeshRef.current = null;
+        };
+    }, []);
 
     return (
         <div className="fixed inset-0 bg-[#0b1120] text-white flex flex-col z-[100] animate-fade-in">

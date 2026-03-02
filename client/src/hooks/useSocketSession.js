@@ -5,7 +5,24 @@ const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export const useSocketSession = (roomCode, user, role) => {
     const socketRef = useRef(null);
+    const joinedRoomKeyRef = useRef(null);
     const [connected, setConnected] = useState(false);
+
+    const emitJoinRoom = useCallback(() => {
+        if (!socketRef.current || !connected || !roomCode || !user) return;
+
+        const roomKey = `${role}:${roomCode}:${user.id}`;
+        if (joinedRoomKeyRef.current === roomKey) return;
+
+        socketRef.current.emit('join_room', {
+            room: roomCode,
+            role: role,
+            ...(role === 'teacher'
+                ? { teacher_id: user.id, teacher_name: user.name }
+                : { student_id: user.id, student_name: user.name })
+        });
+        joinedRoomKeyRef.current = roomKey;
+    }, [connected, roomCode, role, user]);
 
     useEffect(() => {
         // Prevent multiple connections
@@ -20,22 +37,12 @@ export const useSocketSession = (roomCode, user, role) => {
             socketRef.current.on('connect', () => {
                 console.log("Socket connected:", socketRef.current.id);
                 setConnected(true);
-
-                // Auto-join room on connect if we have the info
-                if (roomCode && user) {
-                    socketRef.current.emit('join_room', {
-                        room: roomCode,
-                        role: role,
-                        ...(role === 'teacher'
-                            ? { teacher_id: user.id, teacher_name: user.name }
-                            : { student_id: user.id, student_name: user.name })
-                    });
-                }
             });
 
             socketRef.current.on('disconnect', () => {
                 console.log("Socket disconnected");
                 setConnected(false);
+                joinedRoomKeyRef.current = null;
             });
 
             socketRef.current.on('connect_error', (error) => {
@@ -53,6 +60,10 @@ export const useSocketSession = (roomCode, user, role) => {
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Empty dependency array as requested to prevent reconnect spam
+
+    useEffect(() => {
+        emitJoinRoom();
+    }, [emitJoinRoom]);
 
     const emit = useCallback((event, data) => {
         if (socketRef.current && connected) {
