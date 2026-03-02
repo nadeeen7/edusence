@@ -1,0 +1,463 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useAuth } from '../services/AuthContext';
+import { useMediaStream } from '../hooks/useMediaStream';
+import { useSocketSession } from '../hooks/useSocketSession';
+import Card from '../components/Card';
+import Notification from '../components/Notification';
+
+// Memoized Student Video Component for performance
+const StudentVideo = React.memo(({ student, stream }) => {
+    const videoRef = useRef(null);
+
+    useEffect(() => {
+        if (videoRef.current && stream) {
+            videoRef.current.srcObject = stream;
+        }
+    }, [stream]);
+
+    const attn = student.attention || 0;
+    const borderClass = attn < 40 ? 'ring-red-500' : attn < 70 ? 'ring-yellow-500' : 'ring-green-500';
+
+    return (
+        <div className={`relative aspect-video bg-slate-900 rounded-xl overflow-hidden ring-2 ${borderClass} shadow-2xl transition-all duration-500 group`}>
+            {stream ? (
+                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+            ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center space-y-2">
+                    <div className="w-8 h-8 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Waking Camera...</span>
+                </div>
+            )}
+
+            <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 text-white">
+                <div className={`w-2 h-2 rounded-full ${attn < 40 ? 'bg-red-500' : attn < 70 ? 'bg-yellow-500' : 'bg-green-500 animate-pulse'}`}></div>
+                <span className="text-[10px] font-black">{Math.round(attn)}%</span>
+            </div>
+
+            <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
+                <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold uppercase">
+                        {student.name ? student.name[0] : '?'}
+                    </div>
+                    <span className="text-xs font-bold text-white truncate">{student.name}</span>
+                </div>
+            </div>
+        </div>
+    );
+});
+
+// Memoized Video Grid to prevent unnecessary re-renders of the entire classroom
+const VideoGrid = React.memo(({ students, streams, teacherVideoRef, videoEnabled }) => {
+    return (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 max-w-[1600px] mx-auto">
+            {/* Teacher's Own Feed */}
+            <div className="relative aspect-video bg-black rounded-xl overflow-hidden ring-2 ring-blue-500 shadow-2xl group">
+                <video ref={teacherVideoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
+                <div className="absolute top-2 right-2 bg-blue-600/90 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-md text-white border border-white/10 shadow-lg">You (Teacher)</div>
+                {!videoEnabled && (
+                    <div className="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center space-y-3">
+                        <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700">
+                            <svg className="w-8 h-8 text-slate-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26a4 4 0 015.99 5.99L8.293 6.828l-.325-.335zM4.562 7.63l1.542 1.542A4 4 0 0010 14a3.985 3.985 0 002.828-.929l4.57 4.57a13.06 13.06 0 01-14.444-1.19a1 1 0 111.428-1.39a11.062 11.062 0 001.38 1.144z" clipRule="evenodd"></path></svg>
+                        </div>
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Camera Off</span>
+                    </div>
+                )}
+            </div>
+
+            {/* Student Feeds */}
+            {students.map(student => (
+                <StudentVideo
+                    key={student.id}
+                    student={student}
+                    stream={streams[student.id]}
+                />
+            ))}
+
+            {students.length === 0 && (
+                <div className="col-span-full py-32 text-center space-y-4">
+                    <div className="w-20 h-20 bg-slate-800/30 border border-slate-700/50 rounded-full flex items-center justify-center mx-auto animate-pulse">
+                        <svg className="w-10 h-10 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    </div>
+                    <h3 className="text-slate-400 font-black uppercase tracking-widest text-sm">Waiting for students to join...</h3>
+                </div>
+            )}
+        </div>
+    );
+});
+
+// Main LiveSession Component
+const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
+    const { user } = useAuth();
+    const location = useLocation();
+    const params = new URLSearchParams(location.search);
+
+    // roomCode can come from: 1. parent prop 2. URL param 3. localStorage
+    const roomCode = propRoomCode || params.get('room') || localStorage.getItem('active_class_code') || '';
+
+    const [viewMode, setViewMode] = useState('gallery'); // 'gallery' | 'dashboard'
+    const [activeStudents, setActiveStudents] = useState([]);
+    const [studentStreams, setStudentStreams] = useState({});
+    const [notification, setNotification] = useState(null);
+    const [stats, setStats] = useState({
+        activeCount: 0,
+        classAvg: 0,
+        lowAttn: 0,
+        alerts: 0
+    });
+
+    const pcRefs = useRef({});
+    const teacherVideoRef = useRef(null);
+    const teacherStreamRef = useRef(null);
+
+    // 1. Media Management
+    const {
+        stream: teacherStream,
+        hasStream: hasTeacherStream,
+        startStream,
+        videoEnabled,
+        audioEnabled,
+        toggleVideo,
+        toggleAudio
+    } = useMediaStream();
+
+    // Sync teacherStream Ref and Video Element
+    useEffect(() => {
+        if (hasTeacherStream && teacherStream) {
+            teacherStreamRef.current = teacherStream;
+            if (teacherVideoRef.current && teacherVideoRef.current.srcObject !== teacherStream) {
+                teacherVideoRef.current.srcObject = teacherStream;
+                console.log("Teacher stream attached to video element");
+            }
+        }
+    }, [hasTeacherStream, teacherStream]);
+
+    // 2. Socket Management
+    const { connected, emit, on } = useSocketSession(roomCode, user, 'teacher');
+
+    // Initialize Media
+    useEffect(() => {
+        const init = async () => {
+            if (!teacherStreamRef.current) {
+                await startStream();
+            }
+        };
+        init();
+    }, [startStream]);
+
+    // Sync Stats on Connect
+    useEffect(() => {
+        if (connected && roomCode) {
+            console.log("Teacher Sync Request - Fetching existing students...");
+            emit('request_sync', { room: roomCode });
+        }
+    }, [connected, roomCode, emit]);
+
+    const initiateCall = useCallback(async (socketId, studentId, localStream) => {
+        if (pcRefs.current[studentId]) pcRefs.current[studentId].close();
+
+        const pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+        pcRefs.current[studentId] = pc;
+
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+        pc.ontrack = (event) => {
+            console.log("Teacher received track from:", studentId);
+            setStudentStreams(prev => ({ ...prev, [studentId]: event.streams[0] }));
+        };
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                emit('ice_candidate', { to: socketId, candidate: event.candidate, student_id: 'teacher' });
+            }
+        };
+
+        try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            emit('teacher_offer', { room: roomCode, to: socketId, offer });
+        } catch (err) {
+            console.error("Error creating teacher offer:", err);
+        }
+    }, [emit, roomCode]);
+
+    // Socket Events & Signaling
+    useEffect(() => {
+        if (!connected) return;
+
+        // WebRTC Signaling listeners
+        on('user_joined', async (data) => {
+            console.log("Student joined room:", data.student_name);
+            setNotification({ type: 'info', message: `${data.student_name} joined` });
+            setActiveStudents(prev => {
+                if (!prev.some(s => s.id === data.student_id)) {
+                    return [...prev, { id: data.student_id, name: data.student_name || 'Student', attention: 0, status: 'Connecting' }];
+                }
+                return prev;
+            });
+            if (teacherStreamRef.current) {
+                await initiateCall(data.id, data.student_id, teacherStreamRef.current);
+            }
+        });
+
+        on('student_left', (data) => {
+            const sid = data.student_id;
+            if (pcRefs.current[sid]) {
+                pcRefs.current[sid].close();
+                delete pcRefs.current[sid];
+            }
+            setStudentStreams(prev => {
+                const next = { ...prev };
+                delete next[sid];
+                return next;
+            });
+            setActiveStudents(prev => prev.filter(s => s.id !== sid));
+        });
+
+        on('attention-update', (data) => {
+            const sid = data.userId || data.student_id;
+            setActiveStudents(prev => {
+                const idx = prev.findIndex(s => s.id === sid);
+                if (idx !== -1) {
+                    const next = [...prev];
+                    next[idx] = { ...next[idx], attention: data.attention, status: data.status };
+                    return next;
+                } else {
+                    return [...prev, { id: sid, name: data.student_name || 'Student', attention: data.attention, status: data.status }];
+                }
+            });
+        });
+
+        on('dashboard_update', (data) => {
+            setStats({
+                activeCount: data.active_count,
+                classAvg: data.class_avg,
+                lowAttn: data.low_count,
+                alerts: data.critical_count
+            });
+            if (data.students) {
+                setActiveStudents(data.students);
+            }
+        });
+
+        on('student_answer', async (data) => {
+            const pc = pcRefs.current[data.student_id];
+            if (pc) {
+                try {
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                } catch (err) {
+                    console.error("Error setting remote description:", err);
+                }
+            }
+        });
+
+        on('ice_candidate', async (data) => {
+            const pc = pcRefs.current[data.student_id];
+            if (pc && data.candidate) {
+                try {
+                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } catch (err) {
+                    console.error("Error adding ice candidate:", err);
+                }
+            }
+        });
+
+        return () => {
+            Object.values(pcRefs.current).forEach(pc => pc.close());
+        };
+    }, [connected, emit, on, roomCode, initiateCall]);
+
+    const handleEndClass = () => {
+        if (window.confirm("End this class for everyone?")) {
+            emit('end_session', { room: roomCode });
+            onExit();
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-[#0b1120] text-white flex flex-col z-[100] animate-fade-in">
+            {notification && <div className="absolute top-20 right-6 z-[110]"><Notification {...notification} onClose={() => setNotification(null)} /></div>}
+
+            {/* Premium Header */}
+            <header className="h-16 border-b border-slate-800 bg-slate-900/50 backdrop-blur-xl flex items-center justify-between px-6 shrink-0">
+                <div className="flex items-center gap-4">
+                    <div className="bg-blue-600/20 p-2 rounded-lg border border-blue-500/20">
+                        <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                    </div>
+                    <div>
+                        <h2 className="text-sm font-black uppercase tracking-tighter">Live Classroom</h2>
+                        <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                            <span className="text-[10px] font-mono text-slate-400">ID: {roomCode}</span>
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard.writeText(roomCode);
+                                    setNotification({ type: 'success', message: 'Room Code copied to clipboard!' });
+                                }}
+                                className="p-1 hover:bg-slate-800 rounded transition-colors group/copy"
+                                title="Copy Room Code"
+                            >
+                                <svg className="w-3 h-3 text-slate-500 group-hover/copy:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-2 bg-slate-800/50 p-1 rounded-xl border border-slate-700">
+                    <button
+                        onClick={() => setViewMode('gallery')}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'gallery' ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                    >
+                        Gallery
+                    </button>
+                    <button
+                        onClick={() => setViewMode('dashboard')}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'dashboard' ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                    >
+                        Dashboard
+                    </button>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <div className="hidden md:flex flex-col items-end mr-2">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">Attention Average</span>
+                        <span className={`text-sm font-black ${stats.classAvg < 60 ? 'text-red-400' : 'text-blue-400'}`}>{stats.classAvg}%</span>
+                    </div>
+                    <button onClick={handleEndClass} className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 px-4 py-2 rounded-lg text-xs font-black uppercase transition-all">End Class</button>
+                </div>
+            </header>
+
+            {/* Main Content Area */}
+            <main className="flex-1 overflow-y-auto p-6 relative">
+                {viewMode === 'gallery' ? (
+                    <VideoGrid
+                        students={activeStudents}
+                        streams={studentStreams}
+                        teacherStream={teacherStream}
+                        teacherVideoRef={teacherVideoRef}
+                        videoEnabled={videoEnabled}
+                    />
+                ) : (
+                    <div className="max-w-6xl mx-auto space-y-6">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                            <StatCard label="Active Students" value={stats.activeCount} />
+                            <StatCard label="Class Average" value={`${stats.classAvg}%`} color="text-blue-400" />
+                            <StatCard label="Low Attention" value={stats.lowAttn} color="text-yellow-400" />
+                            <StatCard label="Critical Alerts" value={stats.alerts} color="text-red-400" />
+                        </div>
+
+                        <Card className="bg-slate-900 border-slate-800 overflow-hidden shadow-2xl">
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-800/50 text-[10px] uppercase text-slate-500 font-black tracking-widest border-b border-slate-800">
+                                    <tr>
+                                        <th className="px-6 py-4">Student</th>
+                                        <th className="px-6 py-4">Attention Score</th>
+                                        <th className="px-6 py-4">Status</th>
+                                        <th className="px-6 py-4">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800/50">
+                                    {activeStudents.map(student => (
+                                        <tr key={student.id} className="hover:bg-slate-800/20 transition-all">
+                                            <td className="px-6 py-4 flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-xs uppercase text-slate-300">
+                                                    {student.name ? student.name[0] : '?'}
+                                                </div>
+                                                <span className="font-bold">{student.name}</span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                                        <div className={`h-full ${student.attention < 60 ? 'bg-red-500' : 'bg-blue-500'} transition-all duration-500`} style={{ width: `${student.attention}%` }}></div>
+                                                    </div>
+                                                    <span className="text-xs font-black min-w-[30px]">{Math.round(student.attention)}%</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${student.attention < 40 ? 'bg-red-500/20 text-red-400 border border-red-500/10' : 'bg-blue-500/20 text-blue-400 border border-blue-500/10'}`}>
+                                                    {student.status || 'Monitoring'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <button onClick={() => emit('kick_student', { room: roomCode, student_id: student.id })} className="p-2 text-slate-500 hover:text-red-400 transition-colors">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </Card>
+                    </div>
+                )}
+            </main>
+
+            {/* Bottom Professional Control Bar */}
+            <footer className="h-20 border-t border-slate-800 bg-slate-900 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] flex items-center justify-center relative shrink-0">
+                <div className="flex items-center gap-4 bg-slate-800/80 p-2 rounded-2xl border border-slate-700 shadow-2xl backdrop-blur-md">
+                    <ControlButton
+                        onClick={toggleAudio}
+                        active={audioEnabled}
+                        label={audioEnabled ? 'Mute' : 'Unmute'}
+                        icon={audioEnabled ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>}
+                    />
+
+                    <ControlButton
+                        onClick={toggleVideo}
+                        active={videoEnabled}
+                        label={videoEnabled ? 'Stop Video' : 'Start Video'}
+                        icon={videoEnabled ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>}
+                    />
+
+                    <div className="w-px h-8 bg-slate-700 mx-2"></div>
+
+                    <button
+                        onClick={onExit}
+                        className="bg-slate-700/50 hover:bg-slate-700 text-white px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+                    >
+                        Leave
+                    </button>
+
+                    <button
+                        onClick={handleEndClass}
+                        className="bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-red-600/30 transition-all ml-2"
+                    >
+                        End Meeting
+                    </button>
+                </div>
+
+                <div className="absolute right-8 top-1/2 -translate-y-1/2 hidden lg:flex items-center gap-4">
+                    <div className="flex flex-col items-end">
+                        <span className="text-[10px] font-black text-slate-500 tracking-tighter uppercase leading-none mb-1">Status</span>
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-slate-300">{connected ? 'Live Sync' : 'Reconnecting...'}</span>
+                            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                        </div>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    );
+};
+
+// Internal Helper Components
+const StatCard = ({ label, value, color = "text-white" }) => (
+    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl hover:border-slate-700 transition-colors group">
+        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 group-hover:text-slate-400 transition-colors">{label}</h3>
+        <p className={`text-3xl font-black ${color}`}>{value}</p>
+    </div>
+);
+
+const ControlButton = ({ onClick, active, icon, label }) => (
+    <button
+        onClick={onClick}
+        className={`flex flex-col items-center gap-1 p-2 min-w-[64px] rounded-xl transition-all ${active ? 'text-white hover:bg-slate-700' : 'text-red-400 bg-red-500/10 hover:bg-red-500/20'}`}
+    >
+        {icon}
+        <span className="text-[10px] font-black uppercase tracking-tighter leading-none">{label}</span>
+    </button>
+);
+
+export default LiveSession;
