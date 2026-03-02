@@ -107,5 +107,4 @@ npm install
 - **StudentMonitor.jsx**: Runs the local MediaPipe ML loop and emits attention data via Socket.io.
 - **app.py**: Handles WebRTC signaling, Socket.io event routing, and API endpoints.
 
----
-Developed with ❤️ by the EduSense Team.
+
