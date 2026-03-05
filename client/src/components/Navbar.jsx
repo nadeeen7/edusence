@@ -20,7 +20,6 @@ const Navbar = () => {
                     <div className="flex gap-4 items-center">
                         {user ? (
                             <>
-                                <Link to={user.role === 'teacher' ? "/teacher-dashboard" : "/student-dashboard"} className="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors">Dashboard</Link>
                                 <button onClick={handleLogout} className="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors">
                                     Logout
                                 </button>

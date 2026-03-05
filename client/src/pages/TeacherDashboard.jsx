@@ -65,7 +65,17 @@ const TeacherDashboard = () => {
         highestAttention: "N/A",
         lowestAttention: "N/A",
         classStatus: "Inactive",
-        chartData: []
+        chartData: [],
+        historicalAvg: 0,
+        lastClassStats: {
+            duration: "0 mins",
+            studentsCount: 0,
+            avgAttention: 0,
+            focusedCount: 0,
+            distractedCount: 0,
+            bestStudent: "N/A",
+            needsImprovement: "N/A"
+        }
     });
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState(null);
@@ -96,7 +106,17 @@ const TeacherDashboard = () => {
                     highestAttention: res.data.highestAttention,
                     lowestAttention: res.data.lowestAttention,
                     classStatus: res.data.classStatus,
-                    chartData: res.data.chartData
+                    chartData: res.data.chartData,
+                    historicalAvg: res.data.historicalAvg || 0,
+                    lastClassStats: res.data.lastClassStats || {
+                        duration: "0 mins",
+                        studentsCount: 0,
+                        avgAttention: 0,
+                        focusedCount: 0,
+                        distractedCount: 0,
+                        bestStudent: "N/A",
+                        needsImprovement: "N/A"
+                    }
                 });
             } else {
                 setNotification({ type: "error", message: res.data.message || "Failed to load dashboard data" });
@@ -199,17 +219,17 @@ const TeacherDashboard = () => {
 
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <Card className="bg-[#1e293b]/50 border-blue-500/10 p-6 relative overflow-hidden group hover:border-blue-500/30 transition-all">
-                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-2">Live Students</h3>
+                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-2">Previous Class Attendance</h3>
                     <div className="flex items-end justify-between">
-                        <p className="text-4xl font-black text-white">{stats.activeStudents}</p>
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded ${stats.classStatus === 'Active' ? 'bg-green-500/20 text-green-400' : 'bg-slate-800 text-slate-600'}`}>
-                            {stats.classStatus}
+                        <p className="text-4xl font-black text-white">{stats.totalStudents}</p>
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                            Students
                         </span>
                     </div>
                 </Card>
 
                 <Card className="bg-[#1e293b]/50 border-blue-500/10 p-6 relative overflow-hidden group hover:border-blue-500/30 transition-all">
-                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-2">Class Average</h3>
+                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-2">Class Average Attention</h3>
                     <div className="flex items-end justify-between">
                         <p className="text-4xl font-black text-blue-500">{stats.classAvg}%</p>
                         <div className="w-12 h-12 opacity-20">
@@ -219,13 +239,13 @@ const TeacherDashboard = () => {
                 </Card>
 
                 <Card className="bg-[#1e293b]/50 border-blue-500/10 p-6 relative overflow-hidden group hover:border-blue-500/30 transition-all">
-                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-2">Highest Attention</h3>
+                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-2">Best Student</h3>
                     <p className="text-xl font-black text-white truncate">{stats.highestAttention}</p>
                     <p className="text-[10px] text-green-500 font-bold mt-1">Performing Best</p>
                 </Card>
 
                 <Card className="bg-[#1e293b]/50 border-blue-500/10 p-6 relative overflow-hidden group hover:border-blue-500/30 transition-all">
-                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-2">Lowest Attention</h3>
+                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-2">Needs Improvement</h3>
                     <p className="text-xl font-black text-white truncate">{stats.lowestAttention}</p>
                     <p className="text-[10px] text-red-500 font-bold mt-1">Needs Support</p>
                 </Card>
@@ -240,10 +260,31 @@ const TeacherDashboard = () => {
                     <AttentionChart data={stats.chartData} />
                 </Card>
 
-                <Card className="bg-[#1e293b]/50 border-slate-800 p-6 flex flex-col justify-center text-center">
-                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-4">Total Students Supported</h3>
-                    <p className="text-6xl font-black text-white mb-2">{stats.totalStudents}</p>
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-4">
+                <Card className="bg-[#1e293b]/50 border-slate-800 p-6">
+                    <h3 className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-4">Last Class Summary</h3>
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center pb-3 border-b border-slate-800/50">
+                            <span className="text-xs text-slate-400">Class Duration</span>
+                            <span className="text-sm font-bold text-white">{stats.lastClassStats.duration}</span>
+                        </div>
+                        <div className="flex justify-between items-center pb-3 border-b border-slate-800/50">
+                            <span className="text-xs text-slate-400">Number of Students</span>
+                            <span className="text-sm font-bold text-white">{stats.lastClassStats.studentsCount}</span>
+                        </div>
+                        <div className="flex justify-between items-center pb-3 border-b border-slate-800/50">
+                            <span className="text-xs text-slate-400">Average Attention</span>
+                            <span className="text-sm font-bold text-blue-500">{stats.lastClassStats.avgAttention}%</span>
+                        </div>
+                        <div className="flex justify-between items-center pb-3 border-b border-slate-800/50">
+                            <span className="text-xs text-slate-400">Focused Students</span>
+                            <span className="text-sm font-bold text-green-500">{stats.lastClassStats.focusedCount}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-xs text-slate-400">Distracted Students</span>
+                            <span className="text-sm font-bold text-red-500">{stats.lastClassStats.distractedCount}</span>
+                        </div>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-6">
                         <div className="h-full bg-blue-500 w-3/4 rounded-full"></div>
                     </div>
                 </Card>

@@ -75,65 +75,60 @@ const StudentDashboard = () => {
     if (!user) return null;
 
     return (
-        <div className="space-y-8 animate-fade-in">
-            {notification && <Notification {...notification} />}
+        <div className="flex items-center justify-center min-h-[80vh] animate-fade-in">
+            {notification && <Notification {...notification} onClose={() => setNotification(null)} />}
 
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold text-white">Student Dashboard</h1>
-                    <p className="text-gray-400">Welcome, {user.name || "Student"}</p>
+            <div className="w-full max-w-lg">
+                <div className="text-center mb-8">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/20 mb-5">
+                        <svg className="w-8 h-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                    </div>
+                    <h1 className="text-3xl font-black text-white tracking-tight mb-2">
+                        Welcome, <span className="text-purple-400">{user.name || "Student"}</span>
+                    </h1>
+                    <p className="text-slate-500 text-sm">Enter your classroom code to join a live session</p>
                 </div>
-                <button
-                    onClick={handleLogout}
-                    className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 px-4 py-2 rounded-lg transition-colors font-medium"
-                >
-                    Logout
-                </button>
-            </div>
 
-            <div className="grid md:grid-cols-3 gap-6">
-                <Card className="md:col-span-2">
-                    <h3 className="text-xl font-bold text-white mb-4">Join a Classroom</h3>
-                    <form onSubmit={handleJoinClass} className="flex gap-4">
-                        <input
-                            type="text"
-                            required
-                            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-mono uppercase"
-                            placeholder="Enter Room ID (e.g. CLASS-1234)"
-                            value={joinRoomId}
-                            onChange={(e) => setJoinRoomId(e.target.value.toUpperCase())}
-                        />
+                <Card className="border-purple-500/10 bg-[#1e293b]/50">
+                    <form onSubmit={handleJoinClass} className="space-y-5">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Room ID</label>
+                            <input
+                                type="text"
+                                required
+                                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-5 py-4 text-white text-lg focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-mono uppercase tracking-wider placeholder:text-slate-600"
+                                placeholder="e.g. CLASS-1234"
+                                value={joinRoomId}
+                                onChange={(e) => setJoinRoomId(e.target.value.toUpperCase())}
+                            />
+                        </div>
                         <button
                             type="submit"
-                            disabled={loadingJoin}
-                            className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-lg transition-all shadow-[0_0_15px_rgba(147,51,234,0.3)] whitespace-nowrap"
+                            disabled={loadingJoin || !joinRoomId.trim()}
+                            className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:hover:bg-purple-600 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-xl shadow-purple-600/30 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-3 text-lg"
                         >
-                            {loadingJoin ? "Connecting..." : "Join Session"}
+                            {loadingJoin ? (
+                                <>
+                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                    Connecting...
+                                </>
+                            ) : (
+                                <>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                                    </svg>
+                                    Join Class
+                                </>
+                            )}
                         </button>
                     </form>
-                    <p className="text-xs text-slate-500 mt-4">
+                    <p className="text-[10px] text-slate-600 mt-4 text-center">
                         By joining, you agree to share your camera feed for automated attention monitoring.
                     </p>
                 </Card>
-
-                <Card className="border-blue-500/20 text-center flex flex-col justify-center items-center">
-                    <h3 className="text-sm font-medium text-gray-400 mb-2">Recent Attention Average</h3>
-                    <p className="text-5xl font-extrabold text-blue-400">
-                        {personalAttention}{personalAttention !== "---" && "%"}
-                    </p>
-                </Card>
             </div>
-
-            <Card>
-                <h3 className="text-xl font-bold text-white mb-4">Monitor Status</h3>
-                <div className="flex items-center gap-4 p-4 rounded-xl bg-gray-800/50 border border-gray-700">
-                    <div className="w-3 h-3 rounded-full bg-slate-500 drop-shadow-md"></div>
-                    <div>
-                        <p className="text-white font-medium">Monitor is currently inactive</p>
-                        <p className="text-sm text-gray-400">Join a classroom to activate camera monitoring via backend endpoints.</p>
-                    </div>
-                </div>
-            </Card>
         </div>
     );
 };

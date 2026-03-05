@@ -140,46 +140,91 @@ def get_dashboard_stats(current_user):
     try:
         total_students = Student.query.count()
         
-        # Determine target room (specified or latest active)
+        # Get all meeting links for this teacher
+        all_meetings = MeetingLink.query.filter_by(teacher_id=current_user.id).order_by(MeetingLink.created_at.desc()).all()
+        
+        last_class_room = None
+        if all_meetings:
+            # If the first one is active, the "Last Class" is the second one.
+            # Otherwise, the first one is the "Last Class".
+            if all_meetings[0].is_active and len(all_meetings) > 1:
+                last_class_room = all_meetings[1]
+            elif not all_meetings[0].is_active:
+                last_class_room = all_meetings[0]
+
+        # Initialize defaults
+        last_class_stats = {
+            "duration": "0 mins",
+            "studentsCount": 0,
+            "avgAttention": 0,
+            "focusedCount": 0,
+            "distractedCount": 0,
+            "bestStudent": "N/A",
+            "needsImprovement": "N/A"
+        }
+
+        if last_class_room:
+            sessions = MonitoringSession.query.filter_by(room_code=last_class_room.link_code).all()
+            if sessions:
+                last_class_stats["studentsCount"] = len(sessions)
+                valid_attentions = [s.avg_attention for s in sessions if s.avg_attention is not None]
+                if valid_attentions:
+                    last_class_stats["avgAttention"] = round(sum(valid_attentions) / len(valid_attentions))
+                    
+                    # Focused/Distracted (Threshold 60%)
+                    last_class_stats["focusedCount"] = len([a for a in valid_attentions if a >= 60])
+                    last_class_stats["distractedCount"] = len([a for a in valid_attentions if a < 60])
+                    
+                    # Best/Needs Improvement
+                    # Join with Student to get names
+                    session_data = db.session.query(Student.name, MonitoringSession.avg_attention)\
+                        .join(MonitoringSession, Student.id == MonitoringSession.student_id)\
+                        .filter(MonitoringSession.room_code == last_class_room.link_code)\
+                        .filter(MonitoringSession.avg_attention.isnot(None))\
+                        .order_by(MonitoringSession.avg_attention.desc()).all()
+                    
+                    if session_data:
+                        last_class_stats["bestStudent"] = session_data[0][0]
+                        last_class_stats["needsImprovement"] = session_data[-1][0]
+
+                # Duration calculation
+                start_times = [s.start_time for s in sessions if s.start_time]
+                end_times = [s.end_time for s in sessions if s.end_time]
+                if start_times and end_times:
+                    duration = max(end_times) - min(start_times)
+                    minutes = int(duration.total_seconds() / 60)
+                    last_class_stats["duration"] = f"{minutes} mins"
+
+        # Current live session stats (already partially implemented)
         room_code = request.args.get('room')
-        if not room_code:
-            # Find latest active room for this teacher
-            latest_room = MeetingLink.query.filter_by(teacher_id=current_user.id).order_by(MeetingLink.created_at.desc()).first()
-            if latest_room:
-                room_code = latest_room.link_code
+        if not room_code and all_meetings and all_meetings[0].is_active:
+            room_code = all_meetings[0].link_code
 
         active_count = 0
-        class_avg = 0
-        highest = "N/A"
-        lowest = "N/A"
+        current_class_avg = 0
         status = "Inactive"
 
         if room_code and room_code in classroom_sessions:
             room_data = classroom_sessions[room_code]
-            students = room_data["students"]
-            active_students = [s for sid, s in students.items() if s.get('connected')]
-            
+            active_students = [s for sid, s in room_data["students"].items() if s.get('connected')]
             active_count = len(active_students)
             if active_count > 0:
-                class_avg = round(sum(s['attention'] for s in active_students) / active_count)
-                sorted_students = sorted(active_students, key=lambda x: x['attention'], reverse=True)
-                highest = sorted_students[0]['name']
-                lowest = sorted_students[-1]['name']
+                current_class_avg = round(sum(s['attention'] for s in active_students) / active_count)
             status = "Active" if room_data.get('active') else "Ended"
 
-                # Mock trend data for the line chart (last 10 averages)
-        # In a real production app, you'd query AttentionLog aggregated by minute
-        chart_data = [45, 52, 48, 70, 65, 80, 85, 82, 90, class_avg] if active_count > 0 else [0]*10
+        chart_data = [45, 52, 48, 70, 65, 80, 85, 82, 90, current_class_avg] if active_count > 0 else [0]*10
 
         return jsonify({
             'success': True,
-            'totalStudents': total_students,
+            'totalStudents': last_class_stats["studentsCount"], # This maps to "Previous Class Attendance"
             'activeStudents': active_count,
-            'classAvg': class_avg,
-            'highestAttention': highest,
-            'lowestAttention': lowest,
+            'classAvg': current_class_avg, # Current live average
+            'historicalAvg': last_class_stats["avgAttention"], # For the summary card
+            'highestAttention': last_class_stats["bestStudent"],
+            'lowestAttention': last_class_stats["needsImprovement"],
             'classStatus': status,
-            'chartData': chart_data
+            'chartData': chart_data,
+            'lastClassStats': last_class_stats
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500

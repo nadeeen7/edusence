@@ -6,6 +6,71 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
 import api from '../services/api';
 
+// ─── Draggable PIP Hook ──────────────────────────────────────────────────────
+const useDraggable = (initialPos = { x: 24, y: null }, containerRef) => {
+    const [pos, setPos] = useState(initialPos);
+    const [isDragging, setIsDragging] = useState(false);
+    const dragOffset = useRef({ x: 0, y: 0 });
+    const pipRef = useRef(null);
+
+    const getContainerBounds = () => {
+        if (containerRef?.current) {
+            return containerRef.current.getBoundingClientRect();
+        }
+        return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    };
+
+    const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+
+    const handleStart = useCallback((clientX, clientY) => {
+        if (!pipRef.current) return;
+        const rect = pipRef.current.getBoundingClientRect();
+        dragOffset.current = { x: clientX - rect.left, y: clientY - rect.top };
+        setIsDragging(true);
+    }, []);
+
+    const handleMove = useCallback((clientX, clientY) => {
+        if (!isDragging || !pipRef.current) return;
+        const bounds = getContainerBounds();
+        const pipRect = pipRef.current.getBoundingClientRect();
+
+        const newX = clamp(clientX - bounds.left - dragOffset.current.x, 0, bounds.width - pipRect.width);
+        const newY = clamp(clientY - bounds.top - dragOffset.current.y, 0, bounds.height - pipRect.height);
+
+        setPos({ x: newX, y: newY });
+    }, [isDragging]);
+
+    const handleEnd = useCallback(() => {
+        setIsDragging(false);
+    }, []);
+
+    useEffect(() => {
+        if (!isDragging) return;
+
+        const onMouseMove = (e) => { e.preventDefault(); handleMove(e.clientX, e.clientY); };
+        const onTouchMove = (e) => { e.preventDefault(); handleMove(e.touches[0].clientX, e.touches[0].clientY); };
+        const onEnd = () => handleEnd();
+
+        window.addEventListener('mousemove', onMouseMove, { passive: false });
+        window.addEventListener('mouseup', onEnd);
+        window.addEventListener('touchmove', onTouchMove, { passive: false });
+        window.addEventListener('touchend', onEnd);
+
+        return () => {
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onEnd);
+            window.removeEventListener('touchmove', onTouchMove);
+            window.removeEventListener('touchend', onEnd);
+        };
+    }, [isDragging, handleMove, handleEnd]);
+
+    const onMouseDown = (e) => { e.preventDefault(); handleStart(e.clientX, e.clientY); };
+    const onTouchStart = (e) => { handleStart(e.touches[0].clientX, e.touches[0].clientY); };
+
+    return { pos, isDragging, pipRef, onMouseDown, onTouchStart };
+};
+
+// ─── Main StudentMonitor Component ───────────────────────────────────────────
 const StudentMonitor = () => {
     const { user } = useAuth();
     const location = useLocation();
@@ -17,20 +82,26 @@ const StudentMonitor = () => {
     const [statusMessage, setStatusMessage] = useState("Initializing...");
     const [isWarning, setIsWarning] = useState(false);
     const [teacherStream, setTeacherStream] = useState(null);
-    const [endBanner, setEndBanner] = useState(null); // Non-blocking session end notification
+    const [endBanner, setEndBanner] = useState(null);
     const [handRaised, setHandRaised] = useState(false);
+    const [swapped, setSwapped] = useState(false); // false = teacher big, student PIP
 
     const pcRef = useRef(null);
     const faceMeshRef = useRef(null);
     const mlLoopRef = useRef(null);
     const hiddenVideoRef = useRef(null);
     const previewVideoRef = useRef(null);
+    const mainVideoRef = useRef(null);
     const lastEmitRef = useRef(0);
     const attentionHistoryRef = useRef([]);
     const studentStreamRef = useRef(null);
     const tracksAddedRef = useRef(false);
+    const mainAreaRef = useRef(null);
 
-    // 1. Media Management (Mandatory Cleanup handled by hook)
+    // Draggable PIP
+    const { pos: pipPos, isDragging, pipRef, onMouseDown: pipMouseDown, onTouchStart: pipTouchStart } = useDraggable({ x: 24, y: null }, mainAreaRef);
+
+    // 1. Media Management
     const {
         stream: studentStream,
         hasStream: hasStudentStream,
@@ -41,7 +112,7 @@ const StudentMonitor = () => {
         toggleAudio
     } = useMediaStream();
 
-    // 2. Socket Management (Empty dependency array optimization in hook)
+    // 2. Socket Management
     const { connected, emit, on } = useSocketSession(roomCode, user, 'student');
 
     const toggleHand = () => {
@@ -129,7 +200,6 @@ const StudentMonitor = () => {
             const vid = hiddenVideoRef.current;
             if (vid.readyState >= 2) {
                 try {
-                    // Diagnostic logging for frame flow - only every 10 frames to avoid spam
                     if (Math.random() < 0.1) {
                         console.log(`[ML] Frame Check: ${vid.videoWidth}x${vid.videoHeight}, ready=${vid.readyState}`);
                     }
@@ -138,21 +208,35 @@ const StudentMonitor = () => {
                     console.error("ML processing failed:", e);
                 }
             } else {
-                // If video is stalled, try to kickstart it
                 if (vid.paused) vid.play().catch(() => { });
             }
         }, 500);
     }, [onFaceResults]);
 
-    // Sync local studentStream to Ref and Video Elements
+    // Sync local studentStream to Ref and Video Elements (re-runs on swap)
     useEffect(() => {
         if (hasStudentStream && studentStream) {
             studentStreamRef.current = studentStream;
-            [hiddenVideoRef, previewVideoRef].forEach(vRef => {
-                if (vRef.current && vRef.current.srcObject !== studentStream) {
-                    vRef.current.srcObject = studentStream;
+
+            // Always keep hidden video fed for ML processing
+            if (hiddenVideoRef.current && hiddenVideoRef.current.srcObject !== studentStream) {
+                hiddenVideoRef.current.srcObject = studentStream;
+            }
+
+            // Attach student stream to the correct video element based on swap state
+            if (swapped) {
+                // Student camera is big → mainVideoRef
+                if (mainVideoRef.current) {
+                    mainVideoRef.current.srcObject = studentStream;
+                    mainVideoRef.current.play().catch(() => { });
                 }
-            });
+            } else {
+                // Student camera is PIP → previewVideoRef
+                if (previewVideoRef.current) {
+                    previewVideoRef.current.srcObject = studentStream;
+                    previewVideoRef.current.play().catch(() => { });
+                }
+            }
 
             if (pcRef.current && !tracksAddedRef.current) {
                 console.log("Adding student tracks to existing PC (Post-Stream Load)...");
@@ -162,7 +246,7 @@ const StudentMonitor = () => {
                 tracksAddedRef.current = true;
             }
         }
-    }, [hasStudentStream, studentStream]);
+    }, [hasStudentStream, studentStream, swapped]);
 
     // Initial media setup
     useEffect(() => {
@@ -290,6 +374,11 @@ const StudentMonitor = () => {
         };
     }, []);
 
+    // Compute PIP style (defaults to bottom-left when no y is set)
+    const pipStyle = pipPos.y !== null
+        ? { position: 'absolute', left: pipPos.x, top: pipPos.y, zIndex: 30 }
+        : { position: 'absolute', left: pipPos.x, bottom: 24, zIndex: 30 };
+
     return (
         <div className="fixed inset-0 bg-[#0b1120] text-white flex flex-col z-[100] animate-fade-in">
 
@@ -316,39 +405,96 @@ const StudentMonitor = () => {
             </header>
 
             {/* Immersive Main Area */}
-            <main className="flex-1 flex p-4 gap-4 overflow-hidden relative">
-                {/* Large Teacher Video */}
+            <main ref={mainAreaRef} className="flex-1 flex p-4 gap-4 overflow-hidden relative">
+                {/* Large Video Area */}
                 <div className="flex-1 bg-black rounded-3xl overflow-hidden relative shadow-2xl border border-white/5 ring-1 ring-white/10 group">
-                    <TeacherVideo stream={teacherStream} />
-
-                    {/* Floating PIP Local Feed */}
-                    <div className="absolute bottom-6 left-6 w-48 lg:w-64 aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 ring-2 ring-black/50 z-20 group-hover:scale-105 transition-transform duration-500">
-                        <video
-                            ref={previewVideoRef}
-                            autoPlay playsInline muted
-                            className={`w-full h-full object-cover scale-x-[-1] ${!videoEnabled ? 'hidden' : ''}`}
-                        />
-                        {!videoEnabled && (
-                            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 space-y-2">
-                                <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-slate-600">
-                                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+                    {swapped ? (
+                        /* Student Camera is Big */
+                        <>
+                            <video
+                                ref={mainVideoRef}
+                                autoPlay playsInline muted
+                                className={`w-full h-full object-contain bg-slate-950 scale-x-[-1] ${!videoEnabled ? 'hidden' : ''}`}
+                            />
+                            {!videoEnabled && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 space-y-4">
+                                    <div className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+                                        <svg className="w-10 h-10 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                                    </div>
+                                    <span className="text-sm font-black text-slate-500 uppercase tracking-widest">Camera Off</span>
                                 </div>
-                                <span className="text-[8px] font-black uppercase text-slate-500">Camera Hidden</span>
-                            </div>
-                        )}
-                        <div className="absolute top-2 left-2 bg-black/40 backdrop-blur px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-white tracking-widest border border-white/5">Local Preview</div>
-                    </div>
-
-                    {!teacherStream && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4 bg-slate-900/80 backdrop-blur-md">
-                            <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-                            <p className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] animate-pulse">Waiting for Teacher Stream...</p>
-                        </div>
+                            )}
+                            <div className="absolute top-3 right-3 bg-purple-600/90 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg text-white border border-white/10 shadow-lg">Your Camera</div>
+                        </>
+                    ) : (
+                        /* Teacher Video is Big (default) */
+                        <>
+                            <TeacherVideo stream={teacherStream} />
+                            {!teacherStream && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4 bg-slate-900/80 backdrop-blur-md">
+                                    <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+                                    <p className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] animate-pulse">Waiting for Teacher Stream...</p>
+                                </div>
+                            )}
+                        </>
                     )}
+                </div>
+
+                {/* Draggable PIP */}
+                <div
+                    ref={pipRef}
+                    style={pipStyle}
+                    onMouseDown={pipMouseDown}
+                    onTouchStart={pipTouchStart}
+                    className={`w-48 lg:w-64 aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 ring-2 ring-black/50 transition-shadow duration-300 select-none ${isDragging ? 'shadow-blue-500/30 ring-blue-500/50 cursor-grabbing scale-105' : 'cursor-grab hover:shadow-xl hover:ring-white/20'}`}
+                >
+                    {swapped ? (
+                        /* Teacher is PIP when swapped */
+                        <>
+                            <PipTeacherVideo stream={teacherStream} />
+                            {!teacherStream && (
+                                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 space-y-1">
+                                    <div className="w-6 h-6 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
+                                    <span className="text-[7px] font-black uppercase text-slate-500">Waiting...</span>
+                                </div>
+                            )}
+                            <div className="absolute top-2 left-2 bg-black/50 backdrop-blur px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-white tracking-widest border border-white/5">Teacher</div>
+                        </>
+                    ) : (
+                        /* Student Camera is PIP (default) */
+                        <>
+                            <video
+                                ref={previewVideoRef}
+                                autoPlay playsInline muted
+                                className={`w-full h-full object-cover scale-x-[-1] ${!videoEnabled ? 'hidden' : ''}`}
+                            />
+                            {!videoEnabled && (
+                                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 space-y-2">
+                                    <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-slate-600">
+                                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+                                    </div>
+                                    <span className="text-[8px] font-black uppercase text-slate-500">Camera Hidden</span>
+                                </div>
+                            )}
+                            <div className="absolute top-2 left-2 bg-black/40 backdrop-blur px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-white tracking-widest border border-white/5">You</div>
+                        </>
+                    )}
+
+                    {/* Drag Handle Indicator */}
+                    <div className="absolute bottom-1.5 right-1.5 flex gap-0.5 opacity-40 pointer-events-none">
+                        <div className="w-1 h-1 rounded-full bg-white"></div>
+                        <div className="w-1 h-1 rounded-full bg-white"></div>
+                        <div className="w-1 h-1 rounded-full bg-white"></div>
+                    </div>
+                    <div className="absolute bottom-3.5 right-1.5 flex gap-0.5 opacity-40 pointer-events-none">
+                        <div className="w-1 h-1 rounded-full bg-white"></div>
+                        <div className="w-1 h-1 rounded-full bg-white"></div>
+                        <div className="w-1 h-1 rounded-full bg-white"></div>
+                    </div>
                 </div>
             </main>
 
-            {/* Bottom Control Bar */}
+            {/* Bottom Control Bar — Google Meet Style */}
             <footer className="h-20 bg-slate-900 border-t border-slate-800 flex items-center justify-center shrink-0">
                 <div className="flex items-center gap-4 bg-slate-800/80 p-2 rounded-2xl border border-slate-700 shadow-xl backdrop-blur-md">
                     <ControlButton
@@ -372,6 +518,18 @@ const StudentMonitor = () => {
                         icon={<svg className={`w-5 h-5 ${handRaised ? 'text-yellow-400' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0V12m3 .5V15m0-2.5v-6a1.5 1.5 0 113 0V12m3 .5V15m0-2.5v-6a1.5 1.5 0 113 0V12m-12 0H3a2 2 0 00-2 2v2a2 2 0 002 2h2m13-6h2a2 2 0 012 2v2a2 2 0 01-2 2h-2m-9 4a5 5 0 01-5-5"></path></svg>}
                     />
 
+                    {/* Swap Layout Button */}
+                    <ControlButton
+                        onClick={() => setSwapped(s => !s)}
+                        active={true}
+                        label="Swap View"
+                        icon={
+                            <svg className={`w-5 h-5 transition-transform ${swapped ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                            </svg>
+                        }
+                    />
+
                     <div className="w-px h-8 bg-slate-700 mx-2"></div>
 
                     <button
@@ -388,7 +546,7 @@ const StudentMonitor = () => {
                 </div>
             </footer>
 
-            {/* Hidden Video for ML processing - must be technically 'visible' and 'in layout' for some browsers */}
+            {/* Hidden Video for ML processing */}
             <video
                 ref={hiddenVideoRef}
                 autoPlay
@@ -406,6 +564,8 @@ const StudentMonitor = () => {
     );
 };
 
+// ─── Sub-Components ──────────────────────────────────────────────────────────
+
 const TeacherVideo = React.memo(({ stream }) => {
     const videoRef = useRef(null);
     useEffect(() => {
@@ -413,6 +573,16 @@ const TeacherVideo = React.memo(({ stream }) => {
     }, [stream]);
     return stream ? (
         <video ref={videoRef} autoPlay playsInline className="w-full h-full object-contain bg-slate-950" />
+    ) : null;
+});
+
+const PipTeacherVideo = React.memo(({ stream }) => {
+    const videoRef = useRef(null);
+    useEffect(() => {
+        if (videoRef.current && stream) videoRef.current.srcObject = stream;
+    }, [stream]);
+    return stream ? (
+        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover bg-slate-950" />
     ) : null;
 });
 

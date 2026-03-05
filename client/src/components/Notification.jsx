@@ -1,31 +1,46 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 const Notification = ({ type, message, onClose }) => {
+    const [visible, setVisible] = useState(false);
+    const [exiting, setExiting] = useState(false);
+
+    useEffect(() => {
+        if (message) {
+            setVisible(true);
+            setExiting(false);
+        }
+    }, [message]);
+
     useEffect(() => {
         if (message && onClose) {
-            const timer = setTimeout(onClose, 3000);
+            const timer = setTimeout(() => {
+                setExiting(true);
+                setTimeout(onClose, 250);
+            }, 2000);
             return () => clearTimeout(timer);
         }
     }, [message, onClose]);
 
     if (!message) return null;
 
+    const colors = {
+        success: 'bg-emerald-500/90 text-white',
+        error: 'bg-red-500/90 text-white',
+        warning: 'bg-amber-500/90 text-white',
+        info: 'bg-blue-500/90 text-white'
+    };
+
+    const color = colors[type] || colors.info;
+
     return (
-        <div className={`fixed top-20 right-4 z-[200] p-4 rounded-xl backdrop-blur-md border shadow-2xl max-w-sm text-sm transition-all animate-slide-in ${type === "success"
-            ? "bg-green-500/10 border-green-500/30 text-green-300 shadow-[0_4px_30px_rgba(34,197,94,0.1)]"
-            : "bg-red-500/10 border-red-500/30 text-red-300 shadow-[0_4px_30px_rgba(239,68,68,0.1)]"
-            }`}>
-            <div className="flex items-center gap-3">
-                {type === "success" ? (
-                    <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                ) : (
-                    <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                )}
-                <p className="font-medium">{message}</p>
+        <div
+            className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] transition-all duration-250 ease-out ${visible && !exiting
+                    ? 'opacity-100 translate-y-0'
+                    : 'opacity-0 -translate-y-3'
+                }`}
+        >
+            <div className={`${color} backdrop-blur-md px-5 py-2.5 rounded-full shadow-lg text-sm font-bold whitespace-nowrap`}>
+                {message}
             </div>
         </div>
     );

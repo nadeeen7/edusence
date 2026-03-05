@@ -6,8 +6,128 @@ import { useSocketSession } from '../hooks/useSocketSession';
 import Card from '../components/Card';
 import Notification from '../components/Notification';
 
-// Memoized Student Video Component for performance
-const StudentVideo = React.memo(({ student, stream }) => {
+// ─── Focused Student Video (Large View) ─────────────────────────────────────
+const FocusedStudentVideo = React.memo(({ student, stream }) => {
+    const videoRef = useRef(null);
+
+    useEffect(() => {
+        if (videoRef.current && stream) {
+            videoRef.current.srcObject = stream;
+        }
+    }, [stream]);
+
+    const attn = student.attention || 0;
+    const borderColor = attn < 40 ? 'ring-red-500' : attn < 70 ? 'ring-yellow-500' : 'ring-green-500';
+    const attnColor = attn < 40 ? 'from-red-500 to-red-600' : attn < 70 ? 'from-yellow-500 to-amber-600' : 'from-emerald-500 to-green-600';
+
+    return (
+        <div className={`relative w-full h-full bg-slate-950 rounded-2xl overflow-hidden ring-2 ${borderColor} shadow-2xl`}>
+            {stream ? (
+                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-contain" />
+            ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center space-y-3">
+                    <div className="w-12 h-12 border-3 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Connecting Camera...</span>
+                </div>
+            )}
+
+            {/* Student Info Overlay */}
+            <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-sm font-black uppercase shadow-lg border-2 border-white/20">
+                            {student.name ? student.name[0] : '?'}
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-black text-white">{student.name}</h3>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Student Feed</span>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        {student.hand_raised && (
+                            <div className="bg-yellow-500 text-black p-2 rounded-full shadow-lg animate-bounce border-2 border-white/30">
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1v3a1 1 0 01-1 1h-3v1a1 1 0 01-2 0v-1H6a1 1 0 01-1-1v-3H4a1 1 0 01-1-1V5a1 1 0 011-1h3V3a1 1 0 011-1h2z"></path></svg>
+                            </div>
+                        )}
+                        <div className={`bg-gradient-to-r ${attnColor} px-4 py-2 rounded-xl shadow-lg`}>
+                            <span className="text-lg font-black text-white">{Math.round(attn)}%</span>
+                            <span className="text-[9px] font-bold text-white/70 uppercase tracking-widest ml-1.5">Attention</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+});
+
+// ─── Thumbnail Video (Small Strip Item) ──────────────────────────────────────
+const ThumbnailVideo = React.memo(({ student, stream, onClick, isTeacher, videoRef: externalVideoRef, videoEnabled }) => {
+    const localVideoRef = useRef(null);
+    const ref = externalVideoRef || localVideoRef;
+
+    useEffect(() => {
+        if (ref.current && stream) {
+            ref.current.srcObject = stream;
+        }
+    }, [stream, ref]);
+
+    const attn = student?.attention || 0;
+    const borderClass = isTeacher ? 'ring-blue-500' : attn < 40 ? 'ring-red-500' : attn < 70 ? 'ring-yellow-500' : 'ring-green-500';
+
+    return (
+        <div
+            onClick={onClick}
+            className={`relative aspect-video bg-slate-900 rounded-xl overflow-hidden ring-2 ${borderClass} shadow-xl transition-all duration-300 cursor-pointer hover:scale-105 hover:ring-4 hover:shadow-2xl group shrink-0 w-48 lg:w-56`}
+        >
+            {isTeacher ? (
+                <>
+                    <video ref={ref} autoPlay playsInline muted className={`w-full h-full object-cover scale-x-[-1] ${!videoEnabled ? 'hidden' : ''}`} />
+                    {!videoEnabled && (
+                        <div className="absolute inset-0 bg-slate-900 flex items-center justify-center">
+                            <span className="text-[9px] font-black text-slate-500 uppercase">Camera Off</span>
+                        </div>
+                    )}
+                    <div className="absolute top-1.5 right-1.5 bg-blue-600/90 text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded text-white border border-white/10">You</div>
+                </>
+            ) : (
+                <>
+                    {stream ? (
+                        <video ref={ref} autoPlay playsInline className="w-full h-full object-cover" />
+                    ) : (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-5 h-5 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
+                        </div>
+                    )}
+                </>
+            )}
+
+            {/* Name + Attention Badge */}
+            <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-gradient-to-t from-black/80 to-transparent">
+                <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-white truncate">{isTeacher ? 'You (Teacher)' : student?.name}</span>
+                    {!isTeacher && (
+                        <div className="flex items-center gap-1">
+                            <div className={`w-1.5 h-1.5 rounded-full ${attn < 40 ? 'bg-red-500' : attn < 70 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+                            <span className="text-[8px] font-black text-white">{Math.round(attn)}%</span>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Hover overlay */}
+            {!isTeacher && (
+                <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                    <div className="bg-black/60 backdrop-blur-sm px-2 py-1 rounded-lg">
+                        <span className="text-[9px] font-black text-white uppercase tracking-widest">Focus</span>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+});
+
+// ─── Student Video (Grid Mode) ───────────────────────────────────────────────
+const StudentVideoGrid = React.memo(({ student, stream, onClick }) => {
     const videoRef = useRef(null);
 
     useEffect(() => {
@@ -20,7 +140,10 @@ const StudentVideo = React.memo(({ student, stream }) => {
     const borderClass = attn < 40 ? 'ring-red-500' : attn < 70 ? 'ring-yellow-500' : 'ring-green-500';
 
     return (
-        <div className={`relative aspect-video bg-slate-900 rounded-xl overflow-hidden ring-2 ${borderClass} shadow-2xl transition-all duration-500 group`}>
+        <div
+            onClick={onClick}
+            className={`relative aspect-video bg-slate-900 rounded-xl overflow-hidden ring-2 ${borderClass} shadow-2xl transition-all duration-500 group max-w-[480px] cursor-pointer hover:ring-4 hover:scale-[1.02]`}
+        >
             {stream ? (
                 <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
             ) : (
@@ -51,16 +174,72 @@ const StudentVideo = React.memo(({ student, stream }) => {
                     <span className="text-xs font-bold text-white truncate">{student.name}</span>
                 </div>
             </div>
+
+            {/* Click to focus hover */}
+            <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/5 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                <div className="bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-xl">
+                    <span className="text-[10px] font-black text-white uppercase tracking-widest">Click to Focus</span>
+                </div>
+            </div>
         </div>
     );
 });
 
-// Memoized Video Grid to prevent unnecessary re-renders of the entire classroom
-const VideoGrid = React.memo(({ students, streams, teacherVideoRef, videoEnabled }) => {
+// ─── Video Grid Component ────────────────────────────────────────────────────
+const VideoGrid = React.memo(({ students, streams, teacherVideoRef, videoEnabled, focusedStudentId, onFocusStudent }) => {
+    const focusedStudent = focusedStudentId ? students.find(s => s.id === focusedStudentId) : null;
+
+    // ── Focus Mode ───────────────────────────────────────────────────────
+    if (focusedStudent) {
+        const otherStudents = students.filter(s => s.id !== focusedStudentId);
+
+        return (
+            <div className="flex flex-col h-full max-w-[1600px] mx-auto gap-4">
+                {/* Back to Gallery Button */}
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => onFocusStudent(null)}
+                        className="flex items-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all border border-slate-700 hover:border-slate-600 shadow-lg"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                        Gallery View
+                    </button>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Focused on {focusedStudent.name}</span>
+                </div>
+
+                {/* Large Focused Video */}
+                <div className="flex-1 min-h-0">
+                    <FocusedStudentVideo
+                        student={focusedStudent}
+                        stream={streams[focusedStudentId]}
+                    />
+                </div>
+
+                {/* Thumbnail Strip */}
+                <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                    <ThumbnailVideo
+                        isTeacher={true}
+                        videoRef={teacherVideoRef}
+                        videoEnabled={videoEnabled}
+                    />
+                    {otherStudents.map(student => (
+                        <ThumbnailVideo
+                            key={student.id}
+                            student={student}
+                            stream={streams[student.id]}
+                            onClick={() => onFocusStudent(student.id)}
+                        />
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    // ── Gallery Mode (default grid) ──────────────────────────────────────
     return (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 max-w-[1600px] mx-auto">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 max-w-[1600px] mx-auto">
             {/* Teacher's Own Feed */}
-            <div className="relative aspect-video bg-black rounded-xl overflow-hidden ring-2 ring-blue-500 shadow-2xl group">
+            <div className="relative aspect-video bg-black rounded-xl overflow-hidden ring-2 ring-blue-500 shadow-2xl group max-w-[480px]">
                 <video ref={teacherVideoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
                 <div className="absolute top-2 right-2 bg-blue-600/90 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-md text-white border border-white/10 shadow-lg">You (Teacher)</div>
                 {!videoEnabled && (
@@ -75,10 +254,11 @@ const VideoGrid = React.memo(({ students, streams, teacherVideoRef, videoEnabled
 
             {/* Student Feeds */}
             {students.map(student => (
-                <StudentVideo
+                <StudentVideoGrid
                     key={student.id}
                     student={student}
                     stream={streams[student.id]}
+                    onClick={() => onFocusStudent(student.id)}
                 />
             ))}
 
@@ -94,7 +274,7 @@ const VideoGrid = React.memo(({ students, streams, teacherVideoRef, videoEnabled
     );
 });
 
-// Main LiveSession Component
+// ─── Main LiveSession Component ──────────────────────────────────────────────
 const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
     const { user } = useAuth();
     const location = useLocation();
@@ -104,6 +284,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
     const roomCode = propRoomCode || params.get('room') || localStorage.getItem('active_class_code') || '';
 
     const [viewMode, setViewMode] = useState('gallery'); // 'gallery' | 'dashboard'
+    const [focusedStudentId, setFocusedStudentId] = useState(null);
     const [activeStudents, setActiveStudents] = useState([]);
     const [studentStreams, setStudentStreams] = useState({});
     const [notification, setNotification] = useState(null);
@@ -117,6 +298,11 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
     const pcRefs = useRef({});
     const teacherVideoRef = useRef(null);
     const teacherStreamRef = useRef(null);
+
+    // Reset focus when switching to dashboard
+    useEffect(() => {
+        if (viewMode === 'dashboard') setFocusedStudentId(null);
+    }, [viewMode]);
 
     // 1. Media Management
     const {
@@ -139,7 +325,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 teacherVideoRef.current.play().catch(e => console.warn("Teacher video play error:", e));
             }
         }
-    }, [hasTeacherStream, teacherStream, viewMode]);
+    }, [hasTeacherStream, teacherStream, viewMode, focusedStudentId]);
 
     // 2. Socket Management
     const { connected, emit, on } = useSocketSession(roomCode, user, 'teacher');
@@ -228,6 +414,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 return next;
             });
             setActiveStudents(prev => prev.filter(s => s.id !== sid));
+            setFocusedStudentId(prev => prev === sid ? null : prev);
         });
 
         on('attention-update', (data) => {
@@ -370,14 +557,15 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                         teacherStream={teacherStream}
                         teacherVideoRef={teacherVideoRef}
                         videoEnabled={videoEnabled}
+                        focusedStudentId={focusedStudentId}
+                        onFocusStudent={setFocusedStudentId}
                     />
                 ) : (
                     <div className="max-w-6xl mx-auto space-y-6">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                             <StatCard label="Active Students" value={stats.activeCount} />
                             <StatCard label="Class Average" value={`${stats.classAvg}%`} color="text-blue-400" />
                             <StatCard label="Low Attention" value={stats.lowAttn} color="text-yellow-400" />
-                            <StatCard label="Critical Alerts" value={stats.alerts} color="text-red-400" />
                         </div>
 
                         <Card className="bg-slate-900 border-slate-800 overflow-hidden shadow-2xl">
@@ -411,14 +599,25 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${student.attention < 40 ? 'bg-red-500/20 text-red-400 border border-red-500/10' : 'bg-blue-500/20 text-blue-400 border border-blue-500/10'}`}>
-                                                    {student.status || 'Monitoring'}
+                                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${student.attention < 60 ? 'bg-red-500/20 text-red-400 border border-red-500/10' : 'bg-blue-500/20 text-blue-400 border border-blue-500/10'}`}>
+                                                    {student.attention < 60 ? 'Distracted' : 'Focused'}
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <button onClick={() => emit('kick_student', { room: roomCode, student_id: student.id })} className="p-2 text-slate-500 hover:text-red-400 transition-colors">
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
-                                                </button>
+                                                <div className="flex items-center gap-2">
+                                                    {/* Kick Student */}
+                                                    <div className="relative group/kick">
+                                                        <button
+                                                            onClick={() => emit('kick_student', { room: roomCode, student_id: student.id })}
+                                                            className="w-8 h-8 rounded-lg bg-slate-800/50 border border-slate-700/50 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20 transition-all"
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                                                        </button>
+                                                        <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-[10px] text-red-300 px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/kick:opacity-100 transition-opacity pointer-events-none border border-slate-700">
+                                                            Remove Student
+                                                        </span>
+                                                    </div>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -477,7 +676,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
     );
 };
 
-// Internal Helper Components
+// ─── Internal Helper Components ──────────────────────────────────────────────
 const StatCard = ({ label, value, color = "text-white" }) => (
     <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl hover:border-slate-700 transition-colors group">
         <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 group-hover:text-slate-400 transition-colors">{label}</h3>

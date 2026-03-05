@@ -1,4 +1,4 @@
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -13,7 +13,7 @@ import LiveSession from "./pages/LiveSession";
 
 function App() {
   const location = useLocation();
-  const hideNavbar = ["/live", "/monitor"].some(path => location.pathname.startsWith(path));
+  const hideNavbar = ["/monitor"].some(path => location.pathname.startsWith(path));
 
   return (
     <div className="min-h-screen bg-black text-gray-100 font-sans selection:bg-blue-500/30">
@@ -43,11 +43,9 @@ function App() {
             </ProtectedRoute>
           } />
 
-          <Route path="/live" element={
-            <ProtectedRoute role="teacher">
-              <LiveSession />
-            </ProtectedRoute>
-          } />
+          <Route path="/teacher_dashboard" element={<Navigate to="/teacher-dashboard" replace />} />
+          <Route path="/student_dashboard" element={<Navigate to="/student-dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>
