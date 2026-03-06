@@ -271,21 +271,10 @@ const TeacherDashboard = () => {
                             <span className="text-xs text-slate-400">Number of Students</span>
                             <span className="text-sm font-bold text-white">{stats.lastClassStats.studentsCount}</span>
                         </div>
-                        <div className="flex justify-between items-center pb-3 border-b border-slate-800/50">
+                        <div className="flex justify-between items-center">
                             <span className="text-xs text-slate-400">Average Attention</span>
                             <span className="text-sm font-bold text-blue-500">{stats.lastClassStats.avgAttention}%</span>
                         </div>
-                        <div className="flex justify-between items-center pb-3 border-b border-slate-800/50">
-                            <span className="text-xs text-slate-400">Focused Students</span>
-                            <span className="text-sm font-bold text-green-500">{stats.lastClassStats.focusedCount}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-xs text-slate-400">Distracted Students</span>
-                            <span className="text-sm font-bold text-red-500">{stats.lastClassStats.distractedCount}</span>
-                        </div>
-                    </div>
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-6">
-                        <div className="h-full bg-blue-500 w-3/4 rounded-full"></div>
                     </div>
                 </Card>
             </div>

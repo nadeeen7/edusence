@@ -203,6 +203,8 @@ def get_dashboard_stats(current_user):
         active_count = 0
         current_class_avg = 0
         status = "Inactive"
+        highest_attn_str = "N/A"
+        lowest_attn_str = "N/A"
 
         if room_code and room_code in classroom_sessions:
             room_data = classroom_sessions[room_code]
@@ -210,18 +212,24 @@ def get_dashboard_stats(current_user):
             active_count = len(active_students)
             if active_count > 0:
                 current_class_avg = round(sum(s['attention'] for s in active_students) / active_count)
+                
+                # Sorted for best/worst in CURRENT session
+                sorted_by_attn = sorted(active_students, key=lambda x: x['attention'], reverse=True)
+                highest_attn_str = f"{sorted_by_attn[0]['name']} - {sorted_by_attn[0]['attention']}%"
+                lowest_attn_str = f"{sorted_by_attn[-1]['name']} - {sorted_by_attn[-1]['attention']}%"
+                
             status = "Active" if room_data.get('active') else "Ended"
 
-        chart_data = [45, 52, 48, 70, 65, 80, 85, 82, 90, current_class_avg] if active_count > 0 else [0]*10
+        chart_data = [0]*9 + [current_class_avg] if active_count > 0 else [0]*10
 
         return jsonify({
             'success': True,
-            'totalStudents': last_class_stats["studentsCount"], # This maps to "Previous Class Attendance"
+            'totalStudents': last_class_stats["studentsCount"], # Maps to "Previous Class Attendance"
             'activeStudents': active_count,
             'classAvg': current_class_avg, # Current live average
             'historicalAvg': last_class_stats["avgAttention"], # For the summary card
-            'highestAttention': last_class_stats["bestStudent"],
-            'lowestAttention': last_class_stats["needsImprovement"],
+            'highestAttention': highest_attn_str, # Current best
+            'lowestAttention': lowest_attn_str, # Current worst
             'classStatus': status,
             'chartData': chart_data,
             'lastClassStats': last_class_stats
@@ -406,7 +414,7 @@ def handle_attention_update(data):
         }, room=room)
         
         # Broadcast dashboard stats
-        broadcast_dashboard_update(room)
+        recalculate_and_broadcast_stats(room, include_students=True)
 
 @socketio.on('raise_hand')
 def handle_raise_hand(data):
@@ -425,7 +433,7 @@ def handle_raise_hand(data):
         }, room=room)
         
         print(f"[INFO] Student {student_id} {'raised' if is_raised else 'lowered'} hand in {room}")
-        broadcast_dashboard_update(room)
+        recalculate_and_broadcast_stats(room, include_students=True)
 
 @socketio.on('request_sync')
 def handle_request_sync(data):
@@ -510,12 +518,12 @@ def recalculate_and_broadcast_stats(room, include_students=False):
     low_count = len([s for s in active_students if s['attention'] < 60])
     critical_count = len([s for s in active_students if s['attention'] < 40])
     
-    highest = "---"
-    lowest = "---"
+    highest = "N/A"
+    lowest = "N/A"
     if active_students:
         sorted_students = sorted(active_students, key=lambda x: x['attention'], reverse=True)
-        highest = sorted_students[0]['name']
-        lowest = sorted_students[-1]['name']
+        highest = f"{sorted_students[0]['name']} - {sorted_students[0]['attention']}%"
+        lowest = f"{sorted_students[-1]['name']} - {sorted_students[-1]['attention']}%"
 
     payload = {
         'active_count': active_count,
