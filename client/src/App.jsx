@@ -1,6 +1,7 @@
 import { Routes, Route, useLocation, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 import Home from "./pages/Home";
 import Register from "./pages/Register";
@@ -39,7 +40,9 @@ function App() {
 
           <Route path="/monitor" element={
             <ProtectedRoute role="student">
-              <StudentMonitor />
+              <ErrorBoundary>
+                <StudentMonitor />
+              </ErrorBoundary>
             </ProtectedRoute>
           } />
 

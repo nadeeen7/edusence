@@ -48,8 +48,10 @@ export const useMediaStream = () => {
                 videoTrack.enabled = !videoTrack.enabled;
                 setVideoEnabled(videoTrack.enabled);
                 console.log(`Video toggled: ${videoTrack.enabled}`);
+                return videoTrack.enabled;
             }
         }
+        return false;
     }, []);
 
     const toggleAudio = useCallback(() => {
@@ -59,8 +61,10 @@ export const useMediaStream = () => {
                 audioTrack.enabled = !audioTrack.enabled;
                 setAudioEnabled(audioTrack.enabled);
                 console.log(`Audio toggled: ${audioTrack.enabled}`);
+                return audioTrack.enabled;
             }
         }
+        return false;
     }, []);
 
     useEffect(() => {

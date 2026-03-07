@@ -58,3 +58,14 @@ class MeetingLink(db.Model):
     class_name = db.Column(db.String)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
     is_active = db.Column(db.Boolean, default=True)
+
+class SessionAnalytics(db.Model):
+    __tablename__ = 'session_analytics'
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, nullable=False)
+    teacher_id = db.Column(db.Integer, nullable=False)
+    student_name = db.Column(db.String, nullable=False)
+    overall_attention = db.Column(db.Float, nullable=False)
+    class_duration = db.Column(db.Integer) # Duration in minutes
+    distraction_count = db.Column(db.Integer, default=0)
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())

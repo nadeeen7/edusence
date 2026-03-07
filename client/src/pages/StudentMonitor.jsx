@@ -76,7 +76,7 @@ const StudentMonitor = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const params = new URLSearchParams(location.search);
-    const roomCode = (params.get("room") || "").trim().toUpperCase();
+    const roomCode = (params.get("room") || localStorage.getItem("active_class_code") || "").trim().toUpperCase();
 
     const [attentionLevel, setAttentionLevel] = useState(100);
     const [statusMessage, setStatusMessage] = useState("Initializing...");
@@ -98,6 +98,7 @@ const StudentMonitor = () => {
     const tracksAddedRef = useRef(false);
     const mainAreaRef = useRef(null);
 
+
     // Draggable PIP
     const { pos: pipPos, isDragging, pipRef, onMouseDown: pipMouseDown, onTouchStart: pipTouchStart } = useDraggable({ x: 24, y: null }, mainAreaRef);
 
@@ -115,11 +116,37 @@ const StudentMonitor = () => {
     // 2. Socket Management
     const { connected, emit, on } = useSocketSession(roomCode, user, 'student');
 
+    const videoEnabledRef = useRef(videoEnabled);
+
+    useEffect(() => {
+        videoEnabledRef.current = videoEnabled;
+    }, [videoEnabled]);
+
     const toggleHand = () => {
         const newState = !handRaised;
         setHandRaised(newState);
-        emit('raise_hand', { room: roomCode, student_id: user.id, is_raised: newState });
+        emit('raise_hand', { room: roomCode, student_id: user?.id, is_raised: newState });
     };
+
+    const handleToggleVideo = useCallback(() => {
+        const newState = toggleVideo();
+        emit('media_state_change', {
+            room: roomCode,
+            student_id: user?.id,
+            videoEnabled: newState,
+            audioEnabled: audioEnabled
+        });
+    }, [toggleVideo, audioEnabled, emit, roomCode, user?.id]);
+
+    const handleToggleAudio = useCallback(() => {
+        const newState = toggleAudio();
+        emit('media_state_change', {
+            room: roomCode,
+            student_id: user?.id,
+            videoEnabled: videoEnabled,
+            audioEnabled: newState
+        });
+    }, [toggleAudio, videoEnabled, emit, roomCode, user?.id]);
 
     const onFaceResults = useCallback((results) => {
         let score = 0;
@@ -141,7 +168,10 @@ const StudentMonitor = () => {
             else if (pitch < -0.15) { score = 50; status = "Looking Up"; }
         }
 
-        if (score === 0) {
+        if (!videoEnabledRef.current) {
+            score = 0; // Attention is 0 when camera is off
+            status = "Camera Off";
+        } else if (score === 0) {
             console.warn("Attention score is 0 - Face not detected or MediaPipe failing");
         }
 
@@ -156,8 +186,8 @@ const StudentMonitor = () => {
         if (now - lastEmitRef.current > 2000 && connected) {
             console.log(`[ML] Emitting focus data: ${smoothed}% (${status})`);
             emit('attention-update', {
-                userId: user.id,
-                student_id: user.id,
+                userId: user?.id,
+                student_id: user?.id,
                 room: roomCode,
                 attention: smoothed,
                 status: status,
@@ -355,7 +385,7 @@ const StudentMonitor = () => {
         });
 
         return () => { if (pcRef.current) pcRef.current.close(); };
-    }, [connected, emit, navigate, on, roomCode, user.id, user.name]);
+    }, [connected, emit, navigate, on, roomCode, user?.id, user?.name]);
 
     useEffect(() => {
         return () => {
@@ -498,14 +528,14 @@ const StudentMonitor = () => {
             <footer className="h-20 bg-slate-900 border-t border-slate-800 flex items-center justify-center shrink-0">
                 <div className="flex items-center gap-4 bg-slate-800/80 p-2 rounded-2xl border border-slate-700 shadow-xl backdrop-blur-md">
                     <ControlButton
-                        onClick={toggleAudio}
+                        onClick={handleToggleAudio}
                         active={audioEnabled}
                         label={audioEnabled ? 'Mic On' : 'Mic Off'}
                         icon={audioEnabled ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 1v3m0 18v3m8.5-12.5h-3m-13 0h-3m15.89-6.39l-2.12 2.12m-10.77 10.77l-2.12 2.12m10.77-10.77l2.12 2.12M6.34 6.34l-2.12 2.12"></path></svg>}
                     />
 
                     <ControlButton
-                        onClick={toggleVideo}
+                        onClick={handleToggleVideo}
                         active={videoEnabled}
                         label={videoEnabled ? 'Video On' : 'Video Off'}
                         icon={videoEnabled ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>}

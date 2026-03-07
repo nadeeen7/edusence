@@ -3,16 +3,22 @@ import { createContext, useContext, useState, useEffect } from 'react';
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
+    // Initialize state synchronously so protected routes don't flash loading/redirect
     const [user, setUser] = useState(() => {
-        const stored = localStorage.getItem('user');
-        return stored ? JSON.parse(stored) : null;
+        try {
+            const stored = localStorage.getItem('user');
+            return stored && stored !== "undefined" ? JSON.parse(stored) : null;
+        } catch {
+            return null;
+        }
     });
+
     const [token, setToken] = useState(() => localStorage.getItem('token') || null);
 
-    useEffect(() => {
-        // Just in case of external changes, but usually not needed with synchronous init
-        // We'll keep it empty for now or remove if possible.
-    }, []);
+    // Since we read entirely synchronously from local storage on mount, loading is false instantly.
+    const [loading, setLoading] = useState(false);
+
+    // Removed cross-tab storage listener as it caused unstable unmounts on same-tab storage changes
 
     const login = (userData, token) => {
         // Clear ALL previous auth data to prevent stale tokens across roles
@@ -40,7 +46,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     return (
-        <AuthContext.Provider value={{ user, token, login, logout }}>
+        <AuthContext.Provider value={{ user, token, loading, login, logout }}>
             {children}
         </AuthContext.Provider>
     );

@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 # Local Imports
 from config import Config
-from models import db, Teacher, Student, MonitoringSession, AttentionLog, Alert, MeetingLink
+from models import db, Teacher, Student, MonitoringSession, AttentionLog, Alert, MeetingLink, SessionAnalytics
 from auth import generate_token, token_required
 
 # Load environment variables
@@ -29,7 +29,7 @@ origins = [
     'http://127.0.0.1:5174'
 ]
 
-CORS(app, supports_credentials=True, origins=origins)
+CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
 db.init_app(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
@@ -137,6 +137,9 @@ def validate_room(current_user):
 @app.route('/api/dashboard/stats', methods=['GET'])
 @token_required
 def get_dashboard_stats(current_user):
+    if not isinstance(current_user, Teacher):
+        return jsonify({'success': False, 'message': 'Teacher access required'}), 403
+        
     try:
         total_students = Student.query.count()
         
@@ -154,46 +157,36 @@ def get_dashboard_stats(current_user):
 
         # Initialize defaults
         last_class_stats = {
-            "duration": "0 mins",
+            "duration": 0,
             "studentsCount": 0,
             "avgAttention": 0,
-            "focusedCount": 0,
-            "distractedCount": 0,
             "bestStudent": "N/A",
             "needsImprovement": "N/A"
         }
 
-        if last_class_room:
-            sessions = MonitoringSession.query.filter_by(room_code=last_class_room.link_code).all()
-            if sessions:
-                last_class_stats["studentsCount"] = len(sessions)
-                valid_attentions = [s.avg_attention for s in sessions if s.avg_attention is not None]
-                if valid_attentions:
-                    last_class_stats["avgAttention"] = round(sum(valid_attentions) / len(valid_attentions))
-                    
-                    # Focused/Distracted (Threshold 60%)
-                    last_class_stats["focusedCount"] = len([a for a in valid_attentions if a >= 60])
-                    last_class_stats["distractedCount"] = len([a for a in valid_attentions if a < 60])
-                    
-                    # Best/Needs Improvement
-                    # Join with Student to get names
-                    session_data = db.session.query(Student.name, MonitoringSession.avg_attention)\
-                        .join(MonitoringSession, Student.id == MonitoringSession.student_id)\
-                        .filter(MonitoringSession.room_code == last_class_room.link_code)\
-                        .filter(MonitoringSession.avg_attention.isnot(None))\
-                        .order_by(MonitoringSession.avg_attention.desc()).all()
-                    
-                    if session_data:
-                        last_class_stats["bestStudent"] = session_data[0][0]
-                        last_class_stats["needsImprovement"] = session_data[-1][0]
-
-                # Duration calculation
-                start_times = [s.start_time for s in sessions if s.start_time]
-                end_times = [s.end_time for s in sessions if s.end_time]
-                if start_times and end_times:
-                    duration = max(end_times) - min(start_times)
-                    minutes = int(duration.total_seconds() / 60)
-                    last_class_stats["duration"] = f"{minutes} mins"
+        # Find the most recently completed session for this teacher
+        last_analytics = SessionAnalytics.query.filter_by(teacher_id=current_user.id)\
+            .order_by(SessionAnalytics.timestamp.desc()).first()
+        
+        if last_analytics:
+            latest_session_id = last_analytics.session_id
+            
+            # Get all records for that exact session_id (one row per student)
+            session_group = db.session.query(SessionAnalytics).filter_by(
+                teacher_id=current_user.id, 
+                session_id=latest_session_id
+            ).all()
+            
+            print(f"[DEBUG] Dashboard: teacher={current_user.id}, latest_session_id={latest_session_id}, students_in_group={len(session_group) if session_group else 0}", flush=True)
+                
+            if session_group:
+                last_class_stats["studentsCount"] = len(session_group)
+                last_class_stats["avgAttention"] = round(sum(s.overall_attention for s in session_group) / len(session_group))
+                last_class_stats["duration"] = session_group[0].class_duration
+                
+                sorted_sessions = sorted(session_group, key=lambda x: x.overall_attention, reverse=True)
+                last_class_stats["bestStudent"] = f"{sorted_sessions[0].student_name} – {round(sorted_sessions[0].overall_attention)}%"
+                last_class_stats["needsImprovement"] = f"{sorted_sessions[-1].student_name} – {round(sorted_sessions[-1].overall_attention)}%"
 
         # Current live session stats (already partially implemented)
         room_code = request.args.get('room')
@@ -215,10 +208,22 @@ def get_dashboard_stats(current_user):
                 
                 # Sorted for best/worst in CURRENT session
                 sorted_by_attn = sorted(active_students, key=lambda x: x['attention'], reverse=True)
-                highest_attn_str = f"{sorted_by_attn[0]['name']} - {sorted_by_attn[0]['attention']}%"
-                lowest_attn_str = f"{sorted_by_attn[-1]['name']} - {sorted_by_attn[-1]['attention']}%"
+                highest_attn_str = f"{sorted_by_attn[0]['name']} – {sorted_by_attn[0]['attention']}%"
+                lowest_attn_str = f"{sorted_by_attn[-1]['name']} – {sorted_by_attn[-1]['attention']}%"
                 
             status = "Active" if room_data.get('active') else "Ended"
+
+        # Update lastClassStats with distraction count
+        if last_analytics and 'session_group' in locals() and 'session_group' in vars():
+            last_class_stats["totalDistractions"] = sum(getattr(s, 'distraction_count', 0) for s in session_group)
+        elif last_analytics:
+             # Try to find session_group if it wasn't already calculated
+             latest_ts = last_analytics.timestamp
+             # We can't easily re-calculate session_group here without re-querying or restructuring.
+             # Let's just use the single last_analytics distraction count as fallback if group fails.
+             last_class_stats["totalDistractions"] = getattr(last_analytics, 'distraction_count', 0)
+        else:
+            last_class_stats["totalDistractions"] = 0
 
         chart_data = [0]*9 + [current_class_avg] if active_count > 0 else [0]*10
 
@@ -235,45 +240,62 @@ def get_dashboard_stats(current_user):
             'lastClassStats': last_class_stats
         })
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        print(f"[ERROR] SQL/Dashboard Exception: {str(e)}", flush=True)
+        return jsonify({'success': False, 'message': "Failed to load dashboard statistics"}), 500
 
 @app.route('/api/download_report', methods=['GET'])
 @token_required
 def download_report(current_user):
-    """Aggregate stats and generate CSV for all sessions"""
+    """Aggregate stats and generate CSV for the most recently completed session"""
+    if not isinstance(current_user, Teacher):
+        return jsonify({'success': False, 'message': 'Teacher access required'}), 403
+        
     try:
-        room_limit = request.args.get('room')
-        query = db.session.query(Student, MonitoringSession)\
-            .join(MonitoringSession, Student.id == MonitoringSession.student_id)
-        
-        if room_limit:
-            query = query.filter(MonitoringSession.room_code == room_limit)
+        # Find the most recently completed session for this teacher
+        last_meeting = MeetingLink.query.filter_by(teacher_id=current_user.id, is_active=False)\
+            .order_by(MeetingLink.created_at.desc()).first()
             
-        sessions = query.all()
+        print(f"[DEBUG] Download Report - Teacher ID: {current_user.id}, Last Meeting: {last_meeting.id if last_meeting else 'None'}", flush=True)
+            
+        if not last_meeting:
+            return jsonify({'success': False, 'message': 'No completed sessions found'}), 404
+            
+        # Get analytics for this specific session
+        records = SessionAnalytics.query.filter_by(session_id=last_meeting.id, teacher_id=current_user.id).all()
         
+        if not records:
+            return jsonify({'success': False, 'message': 'No data found for the latest session'}), 404
+            
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(['Student ID', 'Student Name', 'Room', 'Start Time', 'End Time', 'Avg Attention (%)', 'Alerts'])
         
-        for student, ms in sessions:
-            writer.writerow([
-                student.id,
-                student.name,
-                ms.room_code,
-                ms.start_time.isoformat() if ms.start_time else '',
-                ms.end_time.isoformat() if ms.end_time else 'Active',
-                round(ms.avg_attention or 0),
-                ms.alerts_count or 0
-            ])
+        # Specified columns
+        writer.writerow(['Student Name', 'Overall Attention (%)', 'Performance'])
+        
+        for r in records:
+            attn = round(r.overall_attention)
+            
+            # Performance Classification
+            if attn >= 80:
+                perf = "Good"
+            elif attn >= 50:
+                perf = "Average"
+            else:
+                perf = "Needs Improvement"
+                
+            writer.writerow([r.student_name, f"{attn}%", perf])
             
         output.seek(0)
         return Response(
             output.getvalue(),
             mimetype="text/csv",
-            headers={"Content-Disposition": f"attachment;filename=edusense_report_{datetime.now().strftime('%Y%m%d')}.csv"}
+            headers={
+                "Content-disposition": f"attachment; filename=class_report_{last_meeting.id}.csv"
+            }
         )
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"[ERROR] Report Generation Error: {str(e)}", flush=True)
+        return jsonify({'success': False, 'message': "Failed to generate report"}), 500
 
 @app.route('/api/generate_meeting_link', methods=['POST'])
 @token_required
@@ -354,7 +376,7 @@ def get_student_stats(current_user, student_id):
 def handle_join_room(data):
     room = data.get('room', '').strip().upper()
     role = data.get('role', 'student')
-    user_id = data.get('student_id') or data.get('teacher_id')
+    user_id = str(data.get('student_id') or data.get('teacher_id'))
     user_name = data.get('student_name') or data.get('teacher_name') or "User"
 
     if not room or not user_id: return
@@ -364,17 +386,20 @@ def handle_join_room(data):
         classroom_sessions[room] = {"students": {}, "active": True, "history": []}
 
     if role == 'teacher':
+        join_room(room)
         classroom_sessions[room]["teacher_sid"] = request.sid
         emit('room_joined', {'room': room, 'role': 'teacher'})
         emit('teacher_joined', {'teacher_id': user_id, 'teacher_name': user_name}, room=room, include_self=False)
         recalculate_and_broadcast_stats(room, include_students=True)
     else:
+        join_room(room)
         connected_students[request.sid] = {'student_id': user_id, 'name': user_name, 'room': room}
         classroom_sessions[room]["students"][user_id] = {
             "name": user_name,
             "attention": 100,
             "connected": True,
-            "status": "Focused"
+            "status": "Focused",
+            "hand_raised": False
         }
         emit('room_joined', {'room': room, 'role': 'student'})
         emit('user_joined', {'id': request.sid, 'student_id': user_id, 'student_name': user_name}, room=room, include_self=False)
@@ -384,7 +409,7 @@ def handle_join_room(data):
 @socketio.on('attention-update')
 def handle_attention_update(data):
     room = data.get('room')
-    student_id = data.get('student_id')
+    student_id = str(data.get('student_id'))
     attention = data.get('attention', 0)
     status = data.get('status', 'Unknown')
     
@@ -419,7 +444,7 @@ def handle_attention_update(data):
 @socketio.on('raise_hand')
 def handle_raise_hand(data):
     room = data.get('room')
-    student_id = data.get('student_id')
+    student_id = str(data.get('student_id'))
     is_raised = data.get('is_raised', True)
     
     if room in classroom_sessions and student_id in classroom_sessions[room]['students']:
@@ -432,8 +457,24 @@ def handle_raise_hand(data):
             'is_raised': is_raised
         }, room=room)
         
-        print(f"[INFO] Student {student_id} {'raised' if is_raised else 'lowered'} hand in {room}")
+        print(f"[INFO] Student {student_id} {'raised' if is_raised else 'lowered'} hand in {room}", flush=True)
         recalculate_and_broadcast_stats(room, include_students=True)
+
+@socketio.on('media_state_change')
+def handle_media_state_change(data):
+    room = data.get('room')
+    student_id = str(data.get('student_id'))
+    
+    if room in classroom_sessions and student_id in classroom_sessions[room]['students']:
+        classroom_sessions[room]['students'][student_id]['video_enabled'] = data.get('videoEnabled', True)
+        classroom_sessions[room]['students'][student_id]['audio_enabled'] = data.get('audioEnabled', True)
+        
+        emit('media_state_change', {
+            'student_id': student_id,
+            'videoEnabled': data.get('videoEnabled', True),
+            'audioEnabled': data.get('audioEnabled', True)
+        }, room=room)
+
 
 @socketio.on('request_sync')
 def handle_request_sync(data):
@@ -463,22 +504,70 @@ def handle_end_class(data):
     room = data.get('room')
     if not room: return
     try:
-        # Update both monitoring sessions and meeting links
-        MonitoringSession.query.filter_by(room_code=room, end_time=None).update({
-            "end_time": db.func.current_timestamp()
-        })
-        MeetingLink.query.filter_by(link_code=room).update({"is_active": False})
-        db.session.commit()
+        # Get teacher_id from room
+        meeting = MeetingLink.query.filter_by(link_code=room).first()
+        if not meeting: return
         
+        current_time = datetime.now()
+        duration_mins = 0
+        if meeting.created_at:
+            duration_mins = int((current_time - meeting.created_at).total_seconds() / 60)
+
+        # Prevent duplicate analytics if end_class is called multiple times
+        existing_analytics = SessionAnalytics.query.filter_by(session_id=meeting.id).first()
+        if existing_analytics:
+            print(f"[INFO] Analytics already saved for meeting {meeting.id}, skipping duplicate creation", flush=True)
+        elif room in classroom_sessions:
+            room_data = classroom_sessions[room]
+            for student_id, s_data in room_data["students"].items():
+                # Check for existing monitoring session to link ID and calculate True Average
+                m_session = MonitoringSession.query.filter_by(student_id=student_id, room_code=room, end_time=None).first()
+                
+                overall_avg = s_data['attention'] # Fallback
+                session_id_val = 0
+                
+                if m_session:
+                    session_id_val = m_session.id
+                    # Calculate true average from AttentionLog
+                    logs = AttentionLog.query.filter_by(session_id=m_session.id).all()
+                    if logs:
+                        overall_avg = sum(l.attention_score for l in logs) / len(logs)
+                    
+                    m_session.end_time = current_time
+                    m_session.avg_attention = overall_avg
+
+                # Count distractions for this student/session
+                distraction_count = Alert.query.filter_by(session_id=session_id_val).count() if session_id_val else 0
+
+                # Save to SessionAnalytics — one row per student per session
+                analysis = SessionAnalytics(
+                    session_id=meeting.id, # Use MeetingLink.id for grouping
+                    teacher_id=meeting.teacher_id,
+                    student_name=s_data['name'],
+                    overall_attention=overall_avg,
+                    class_duration=duration_mins,
+                    distraction_count=distraction_count
+                )
+                db.session.add(analysis)
+            
+            room_data["active"] = False
+        
+        # Also mark room inactive if it exists but analytics were already saved
         if room in classroom_sessions:
             classroom_sessions[room]["active"] = False
-            
-        # Unified event broadcast
+
+        # Close all active sessions for this room
+        MonitoringSession.query.filter_by(room_code=room, end_time=None).update({
+            "end_time": current_time
+        })
+        meeting.is_active = False
+        db.session.commit()
+        
         socketio.emit('class_ended', {'message': 'Class has ended.'}, room=room)
-        print(f"[INFO] Room {room} ended by teacher")
+        print(f"[INFO] Room {room} ended and analytics saved", flush=True)
     except Exception as e:
         db.session.rollback()
-        print(f"[ERROR] Failed to end class {room}: {str(e)}")
+        print(f"[ERROR] Failed to end class {room}: {str(e)}", flush=True)
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -541,7 +630,7 @@ def recalculate_and_broadcast_stats(room, include_students=False):
         ]
     
     # Debug log for server activity
-    print(f"[DEBUG] Room {room} Stats: {active_count} active, {class_avg}% avg")
+    print(f"[DEBUG] Room {room} Stats: {active_count} active, {class_avg}% avg", flush=True)
     socketio.emit('dashboard_update', payload, room=room)
 
 def log_attention_to_db(student_id, score, room, status=None):
@@ -566,3 +655,8 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
     socketio.run(app, debug=False, host='0.0.0.0', port=5000)
+
+@app.route('/api/log_error', methods=['POST'])
+def log_error():
+    print("REACT CRASH DETECTED =>", request.json, flush=True)
+    return jsonify({"success": True}), 200

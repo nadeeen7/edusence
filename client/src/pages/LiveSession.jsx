@@ -3,7 +3,58 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from '../services/AuthContext';
 import { useMediaStream } from '../hooks/useMediaStream';
 import { useSocketSession } from '../hooks/useSocketSession';
+import api from "../services/api";
 import Card from '../components/Card';
+
+const AttentionChart = ({ data }) => {
+    const width = 300;
+    const height = 100;
+    const padding = 10;
+
+    if (!data || data.length === 0 || data.every(v => v === 0)) {
+        return (
+            <div className="w-full h-32 mt-4 bg-slate-800/20 rounded-xl border border-dashed border-slate-700/50 flex flex-col items-center justify-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-slate-800/50 flex items-center justify-center text-slate-600">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path></svg>
+                </div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">No Activity Yet</p>
+            </div>
+        );
+    }
+
+    const max = 100;
+    const points = data.map((val, i) => {
+        const x = (i / (data.length - 1)) * (width - 2 * padding) + padding;
+        const y = height - (val / max) * (height - 2 * padding) - padding;
+        return `${x},${y}`;
+    }).join(' ');
+
+    return (
+        <div className="w-full h-32 mt-4 bg-slate-800/20 rounded-xl p-4 border border-slate-700/50 relative group">
+            <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+                <defs>
+                    <linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.4" />
+                        <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+                    </linearGradient>
+                </defs>
+                <path
+                    d={`M ${padding},${height - padding} L ${points} L ${width - padding},${height - padding} Z`}
+                    fill="url(#lineGrad)"
+                />
+                <polyline
+                    fill="none"
+                    stroke="#3b82f6"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    points={points}
+                    className="drop-shadow-[0_0_12px_rgba(59,130,246,0.6)]"
+                />
+            </svg>
+        </div>
+    );
+};
 import Notification from '../components/Notification';
 
 // ─── Focused Student Video (Large View) ─────────────────────────────────────
@@ -13,6 +64,7 @@ const FocusedStudentVideo = React.memo(({ student, stream }) => {
     useEffect(() => {
         if (videoRef.current && stream) {
             videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(e => console.log('Focused Video play prevented:', e));
         }
     }, [stream]);
 
@@ -23,7 +75,7 @@ const FocusedStudentVideo = React.memo(({ student, stream }) => {
     return (
         <div className={`relative w-full h-full bg-slate-950 rounded-2xl overflow-hidden ring-2 ${borderColor} shadow-2xl`}>
             {stream ? (
-                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-contain" />
+                <video ref={videoRef} autoPlay playsInline muted={student?.audioEnabled === false} className="w-full h-full object-contain" />
             ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center space-y-3">
                     <div className="w-12 h-12 border-3 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
@@ -68,6 +120,7 @@ const ThumbnailVideo = React.memo(({ student, stream, onClick, isTeacher, videoR
     useEffect(() => {
         if (ref.current && stream) {
             ref.current.srcObject = stream;
+            ref.current.play().catch((e) => console.log('Thumbnail Video play prevented:', e));
         }
     }, [stream, ref]);
 
@@ -91,20 +144,29 @@ const ThumbnailVideo = React.memo(({ student, stream, onClick, isTeacher, videoR
                 </>
             ) : (
                 <>
-                    {stream ? (
-                        <video ref={ref} autoPlay playsInline className="w-full h-full object-cover" />
-                    ) : (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="w-5 h-5 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
+                    <video ref={ref} autoPlay playsInline muted={student?.audioEnabled === false} className={`w-full h-full object-cover ${student?.videoEnabled === false || !stream ? 'hidden' : ''}`} />
+                    {(student?.videoEnabled === false || !stream) && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+                            {student?.videoEnabled === false ? (
+                                <span className="text-[9px] font-black text-slate-500 uppercase">Camera Off</span>
+                            ) : (
+                                <div className="w-5 h-5 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
+                            )}
                         </div>
                     )}
                 </>
             )}
-
             {/* Name + Attention Badge */}
             <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-gradient-to-t from-black/80 to-transparent">
                 <div className="flex items-center justify-between">
-                    <span className="text-[9px] font-bold text-white truncate">{isTeacher ? 'You (Teacher)' : student?.name}</span>
+                    <div className="flex items-center gap-1.5 shrink-0 min-w-0">
+                        {student?.hand_raised && (
+                            <div className="bg-yellow-500 text-black p-0.5 rounded-full shadow-lg animate-bounce border border-white shrink-0">
+                                <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1v3a1 1 0 01-1 1h-3v1a1 1 0 01-2 0v-1H6a1 1 0 01-1-1v-3H4a1 1 0 01-1-1V5a1 1 0 011-1h3V3a1 1 0 011-1h2z"></path></svg>
+                            </div>
+                        )}
+                        <span className="text-[9px] font-bold text-white truncate">{isTeacher ? 'You (Teacher)' : student?.name}</span>
+                    </div>
                     {!isTeacher && (
                         <div className="flex items-center gap-1">
                             <div className={`w-1.5 h-1.5 rounded-full ${attn < 40 ? 'bg-red-500' : attn < 70 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
@@ -133,6 +195,7 @@ const StudentVideoGrid = React.memo(({ student, stream, onClick }) => {
     useEffect(() => {
         if (videoRef.current && stream) {
             videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(e => console.log('Grid Video play prevented:', e));
         }
     }, [stream]);
 
@@ -144,12 +207,20 @@ const StudentVideoGrid = React.memo(({ student, stream, onClick }) => {
             onClick={onClick}
             className={`relative aspect-video bg-slate-900 rounded-xl overflow-hidden ring-2 ${borderClass} shadow-2xl transition-all duration-500 group max-w-[480px] cursor-pointer hover:ring-4 hover:scale-[1.02]`}
         >
-            {stream ? (
-                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-            ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center space-y-2">
-                    <div className="w-8 h-8 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Waking Camera...</span>
+            <video ref={videoRef} autoPlay playsInline muted={student.audioEnabled === false} className={`w-full h-full object-cover ${student.videoEnabled === false || !stream ? 'hidden' : ''}`} />
+
+            {(student.videoEnabled === false || !stream) && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center space-y-2 bg-slate-900">
+                    {student.videoEnabled === false ? (
+                        <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+                            <svg className="w-5 h-5 text-slate-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26a4 4 0 015.99 5.99L8.293 6.828l-.325-.335zM4.562 7.63l1.542 1.542A4 4 0 0010 14a3.985 3.985 0 002.828-.929l4.57 4.57a13.06 13.06 0 01-14.444-1.19a1 1 0 111.428-1.39a11.062 11.062 0 001.38 1.144z" clipRule="evenodd"></path></svg>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="w-8 h-8 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Waking Camera...</span>
+                        </>
+                    )}
                 </div>
             )}
 
@@ -168,10 +239,15 @@ const StudentVideoGrid = React.memo(({ student, stream, onClick }) => {
 
             <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
                 <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold uppercase">
+                    <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
                         {student.name ? student.name[0] : '?'}
                     </div>
                     <span className="text-xs font-bold text-white truncate">{student.name}</span>
+                    {student.audioEnabled === false && (
+                        <div className="ml-auto bg-red-500/80 p-1 rounded">
+                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 1v3m0 18v3m8.5-12.5h-3m-13 0h-3m15.89-6.39l-2.12 2.12m-10.77 10.77l-2.12 2.12m10.77-10.77l2.12 2.12M6.34 6.34l-2.12 2.12"></path></svg>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -298,6 +374,10 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
     const pcRefs = useRef({});
     const teacherVideoRef = useRef(null);
     const teacherStreamRef = useRef(null);
+    const [trendData, setTrendData] = useState(() => {
+        const saved = localStorage.getItem('trend_data');
+        return saved ? JSON.parse(saved) : [];
+    });
 
     // Reset focus when switching to dashboard
     useEffect(() => {
@@ -423,21 +503,42 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 const idx = prev.findIndex(s => s.id === sid);
                 if (idx !== -1) {
                     const next = [...prev];
-                    next[idx] = { ...next[idx], attention: data.attention, status: data.status, hand_raised: data.hand_raised };
+                    const existing = next[idx];
+                    next[idx] = {
+                        ...existing,
+                        attention: data.attention ?? existing.attention,
+                        status: data.status ?? existing.status,
+                        // Ensure hand_raised is kept if the update doesn't have it, but prefer update if present
+                        hand_raised: (data.hand_raised !== undefined) ? data.hand_raised : existing.hand_raised
+                    };
                     return next;
                 } else {
-                    return [...prev, { id: sid, name: data.student_name || 'Student', attention: data.attention, status: data.status, hand_raised: data.hand_raised }];
+                    return [...prev, {
+                        id: sid,
+                        name: data.student_name || 'Student',
+                        attention: data.attention || 0,
+                        status: data.status || 'Connected',
+                        hand_raised: data.hand_raised || false
+                    }];
                 }
             });
         });
 
         on('student_raised_hand', (data) => {
+            console.log(`[EVENT] Hand ${data.is_raised ? 'Raised' : 'Lowered'} by ${data.student_name}`);
             setNotification({
                 type: data.is_raised ? 'info' : 'success',
-                message: `${data.student_name} ${data.is_raised ? 'raised their hand' : 'lowered their hand'}`
+                message: `${data.student_name} ${data.is_raised ? 'raised their hand' : 'lowered their hand'}`,
+                duration: 5000
             });
             setActiveStudents(prev => prev.map(s =>
                 s.id === data.student_id ? { ...s, hand_raised: data.is_raised } : s
+            ));
+        });
+
+        on('media_state_change', (data) => {
+            setActiveStudents(prev => prev.map(s =>
+                s.id === data.student_id ? { ...s, videoEnabled: data.videoEnabled, audioEnabled: data.audioEnabled } : s
             ));
         });
 
@@ -449,8 +550,32 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 alerts: data.critical_count
             });
             if (data.students) {
-                setActiveStudents(data.students);
+                // We got the full sync payload. Merge robustly.
+                setActiveStudents(prev => {
+                    const next = [...prev];
+                    data.students.forEach(newStudent => {
+                        const idx = next.findIndex(s => s.id === newStudent.id);
+                        if (idx !== -1) {
+                            next[idx] = { ...next[idx], ...newStudent };
+                        } else {
+                            next.push(newStudent);
+                        }
+                    });
+                    // Only keep students that are in the full sync payload, removing disconnected ghosts
+                    return next.filter(s => data.students.some(ns => ns.id === s.id));
+                });
             }
+            // Update trend data
+            const newPoint = data.class_avg || 0;
+            setTrendData(prev => {
+                const updated = [...prev, newPoint].slice(-30);
+                localStorage.setItem('trend_data', JSON.stringify(updated));
+                return updated;
+            });
+
+            // Sync current session state to localStorage for refresh recovery
+            localStorage.setItem('active_class_avg', newPoint);
+            localStorage.setItem('active_class_code', roomCode);
         });
 
         on('student_answer', async (data) => {
@@ -475,6 +600,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
             }
         });
 
+
         return () => {
             console.log("Cleaning up LiveSession - closing all PeerConnections");
             Object.values(pcRefs.current).forEach(pc => {
@@ -489,7 +615,11 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
         if (window.confirm("End this class for everyone?")) {
             console.log("Teacher ending class...");
             emit('end_class', { room: roomCode });
-            onExit();
+
+            // Allow the socket emit to fly over the network before destroying the component/socket
+            setTimeout(() => {
+                onExit();
+            }, 500);
         }
     };
 
@@ -566,6 +696,13 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                             <StatCard label="Active Students" value={stats.activeCount} />
                             <StatCard label="Class Average" value={`${stats.classAvg}%`} color="text-blue-400" />
                             <StatCard label="Low Attention" value={stats.lowAttn} color="text-yellow-400" />
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-6">
+                            <Card className="bg-slate-900/50 border-slate-800 flex flex-col justify-center p-6">
+                                <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Attention Trend (Real-time)</h3>
+                                <AttentionChart data={trendData} />
+                            </Card>
                         </div>
 
                         <Card className="bg-slate-900 border-slate-800 overflow-hidden shadow-2xl">
