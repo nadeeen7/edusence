@@ -20,15 +20,17 @@ The system solves a critical problem in online education: **teachers cannot see 
 
 | Feature | Description |
 |---|---|
-| **Real-Time Attention Tracking** | Uses MediaPipe Face Mesh to detect eye gaze, head pose, and facial expressions to compute per-student attention scores |
-| **Live Teacher Dashboard** | Real-time gallery view of all student video feeds with individual attention percentages, status indicators, and controls |
-| **WebRTC Video Streaming** | Peer-to-peer video/audio between teacher and students with ICE candidate exchange and offer/answer signaling |
+| **Real-Time Attention Tracking** | Uses MediaPipe Face Mesh to detect student focus by analyzing head orientation (pitch) in real time |
+| **Live Student Monitor** | Immersive student interface with AI-powered attention tracking and draggable PIP video |
+| **Live Teacher Dashboard** | Real-time student video grid with individual attention percentages, status indicators, and controls |
+| **Simple Dashboard Portal** | Minimalist teacher interface focused on session starts, attendance tracking and analytics download |
+| **WebRTC Video Streaming** | Peer-to-peer video/audio between teacher and students with robust track management |
 | **Raise Hand** | Students can raise their hand during class; teachers see notifications instantly via Socket.IO |
 | **Mic & Camera Toggle** | Students can mute/unmute audio and enable/disable video, with state synced to the teacher's view |
 | **Session Insights** | Post-class analytics showing duration, average engagement %, and student count per session |
 | **CSV Report Download** | Teachers can download a CSV report of student performance after each session |
 | **Role-Based Auth** | Separate login portals for teachers and students with JWT-based authentication |
-| **Protected Routes** | Role-based route protection ensuring teachers and students only access their own dashboards |
+| **Mobile-Ready Design** | Responsive layout optimized for mobile browsers with stable Swap View functionality |
 | **Persistent Sessions** | Active class sessions persist across page refreshes via `localStorage` |
 
 ---
@@ -69,9 +71,9 @@ The system solves a critical problem in online education: **teachers cannot see 
 AI Processing (Client-Side):
 ┌──────────────────────────────────┐
 │  MediaPipe Face Mesh (468 pts)   │
-│  → Eye Aspect Ratio (EAR)       │
-│  → Mouth Aspect Ratio (MAR)     │
-│  → Head Pose (Yaw / Pitch)      │
+│  → Head Pose (Pitch Analysis)    │
+│  → Attention Status (Focused,    │
+│    Looking Up/Down, etc.)        │
 │  → Attention Score (0–100%)     │
 └──────────────────────────────────┘
 ```
@@ -243,19 +245,16 @@ On the student's device, **MediaPipe Face Mesh** runs locally in the browser:
 - Computes a composite **attention score (0–100%)** every second
 - Streams the score to the server via Socket.IO
 
-### 4. Teacher Sees Live Analytics
-The teacher's **Live Session** dashboard displays:
-- A video gallery of all connected students
-- Per-student attention percentage with color-coded status
-- Class average attention with real-time updates
-- Active student count and raise-hand notifications
-- Controls to kick students or end the class
+- **Live Student Grid** — Immersive gallery of all connected students
+- **Real-time Metrics** — Per-student attention % and class average updates
+- **Session Controls** — Persistent room code share, hand-raise alerts, and session management
+- **Audio/Video Sync** — Mute icons and camera status indicators updated in real-time
 
 ### 5. Post-Session Review
-After ending the class, the **Teacher Dashboard** shows:
-- **Session Insights** — Duration, engagement %, and student count
-- **Attendance** — Accurate per-session student count
-- **CSV Report Download** — Exportable performance data
+After ending the class, the **Teacher Dashboard** provides:
+- **Attendance** — Accurate unique student count from the most recent session
+- **Analytics Export** — Direct CSV download of session performance data
+- **Classy Interface** — Simplified, distraction-free portal for teachers
 
 ---
 
@@ -324,16 +323,13 @@ After ending the class, the **Teacher Dashboard** shows:
 
 ---
 
-## 🔮 Future Improvements
-
 - [ ] **Multi-class History** — Browse analytics from all past sessions, not just the last one
-- [ ] **Student-side Analytics** — Show students their own attention trends over time
+- [ ] **Emotion Detection** — Extend AI to detect student emotions (confused, bored, engaged)
 - [ ] **Screen Recording** — Record class sessions for later review
 - [ ] **Chat System** — In-class text chat between teacher and students
-- [ ] **Emotion Detection** — Extend AI to detect student emotions (confused, bored, engaged)
-- [ ] **Mobile Support** — Responsive design optimizations for phone and tablet devices
-- [ ] **Deployment Pipeline** — Docker containers and CI/CD for production deployment
+- [ ] **Advanced Student Analytics** — Show students their own trends over time
 - [ ] **PostgreSQL Production** — Full migration to PostgreSQL for concurrent access
+- [ ] **Deployment Pipeline** — automated CI/CD for cloud hosting
 
 ---
 
@@ -347,8 +343,6 @@ After ending the class, the **Teacher Dashboard** shows:
 
 This project is developed for educational purposes. All rights reserved.
 
----
 
-<p align="center">
-  Built with ❤️ using React, Flask, and MediaPipe
-</p>
+
+
