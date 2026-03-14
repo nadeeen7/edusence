@@ -301,7 +301,9 @@
     </div>
 
     <!-- Background Processing -->
-    <video id="hiddenVideo" autoplay playsinline muted style="display:none"></video>
+    <!-- Background Processing (not display:none to ensure browser updates frames) -->
+    <video id="hiddenVideo" autoplay playsinline muted
+        style="position:fixed; top:-1000px; left:-1000px; width:100px; height:100px; opacity:0; pointer-events:none;"></video>
 
     <script>
         let socket = null;
@@ -354,7 +356,12 @@
                     audio: true
                 });
                 document.getElementById('pipVideo').srcObject = state.stream;
-                document.getElementById('hiddenVideo').srcObject = state.stream;
+                const hiddenVid = document.getElementById('hiddenVideo');
+                hiddenVid.srcObject = state.stream;
+
+                // Explicitly play to ensure loop starts
+                try { await hiddenVid.play(); } catch (e) { console.warn("Hidden video play error:", e); }
+
                 return true;
             } catch (e) {
                 alert("Camera access is required for the meeting.");
@@ -496,19 +503,43 @@
         }
 
         async function initML() {
+            console.log('[initML] Starting FaceMesh initialization...');
             try {
-                state.faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
+                if (typeof FaceMesh === 'undefined') {
+                    console.error('[initML] FAILED: FaceMesh is not defined. CDN script may not have loaded yet.');
+                    return;
+                }
+                console.log('[initML] FaceMesh global found. Creating instance...');
+                state.faceMesh = new FaceMesh({
+                    locateFile: (file) => {
+                        const url = `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+                        console.log('[initML] Locating file:', url);
+                        return url;
+                    }
+                });
+                console.log('[initML] FaceMesh instance created. Setting options...');
                 state.faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5 });
+                console.log('[initML] Options set. Registering onResults callback...');
                 state.faceMesh.onResults(onFaceResults);
+                console.log('[initML] Callback registered. Initializing (downloads WASM/models)...');
                 await state.faceMesh.initialize();
+                console.log('[initML] ✅ FaceMesh initialized successfully! Starting loop...');
 
-                const vid = document.getElementById('hiddenVideo');
                 async function loop() {
-                    if (!vid.paused && !vid.ended) await state.faceMesh.send({ image: vid });
+                    const vid = document.getElementById('hiddenVideo');
+                    if (!vid.paused && !vid.ended) {
+                        console.log('[FaceMesh] Sending frame to FaceMesh...');
+                        await state.faceMesh.send({ image: vid });
+                    } else {
+                        console.warn(`[FaceMesh] Loop skipped: paused=${vid.paused}, ended=${vid.ended}`);
+                    }
                     requestAnimationFrame(loop);
                 }
+                console.log('[initML] Loop starting...');
                 loop();
-            } catch (e) { console.warn("AI Load skipped/failed", e); }
+            } catch (e) {
+                console.error('[initML] ❌ FaceMesh initialization FAILED:', e);
+            }
         }
 
         function onFaceResults(results) {
@@ -517,7 +548,12 @@
             let status = "Face Not Detected";
             let debugInfo = {};
 
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) {
+            const faceDetected = !!(results.multiFaceLandmarks && results.multiFaceLandmarks[0]);
+            console.log(`[FaceMesh] Results received | Face detected: ${faceDetected}` +
+                (faceDetected ? ` | Landmarks: ${results.multiFaceLandmarks[0].length}` : ' | (Looking for face...)'));
+
+            if (faceDetected) {
+                const _landmarks_check = results.multiFaceLandmarks[0]; // already validated above
                 const landmarks = results.multiFaceLandmarks[0];
 
                 // 1. EAR (Eye Aspect Ratio) calculation
@@ -542,48 +578,56 @@
                 rawScore = 100;
                 status = "Focused";
 
-                // Eye Closure logic
-                if (avgEAR < 0.12) {
+                // Eye Closure logic (EAR: ~0.3 is open, <0.15 is closed)
+                if (avgEAR < 0.15) {
                     if (!state.eyesClosedStart) state.eyesClosedStart = now;
                     const closedDuration = now - state.eyesClosedStart;
-                    if (closedDuration > 2000) {
-                        rawScore -= 70;
+                    if (closedDuration > 1500) {
+                        rawScore -= 80;
                         status = "Sleepy";
-                    } else if (closedDuration > 500) {
-                        rawScore -= 30; // Blinking or looking down
+                    } else if (closedDuration > 300) {
+                        rawScore -= 40; // Blinking or looking down
+                        status = "Distracted (Eyes)";
                     }
                 } else {
                     state.eyesClosedStart = null;
                 }
 
                 // Head Pose logic (Yaw: looking left/right)
-                if (Math.abs(yaw) > 0.25) {
-                    rawScore -= 50;
+                const absYaw = Math.abs(yaw);
+                if (absYaw > 0.18) {
+                    const yawPenalty = absYaw > 0.4 ? 60 : 40;
+                    rawScore -= yawPenalty;
                     status = (yaw > 0) ? "Looking Right" : "Looking Left";
                 }
 
                 // Head Pose logic (Pitch: looking up/down)
                 // Ideal neutral pitch is approx 0.35-0.45 relative to eyes center
                 const normalizedPitch = pitch - 0.4;
-                if (normalizedPitch > 0.15) {
+                const absPitch = Math.abs(normalizedPitch);
+                if (normalizedPitch > 0.12) {
                     if (!state.lookingDownStart) state.lookingDownStart = now;
                     const downDuration = now - state.lookingDownStart;
-                    if (downDuration > 3000) {
-                        rawScore -= 60; // Reduce below 50%
+                    if (downDuration > 2500) {
+                        rawScore -= 70; // Significant focus loss
                         status = "Looking Down (Long)";
                     } else {
-                        rawScore -= 20;
+                        rawScore -= 30;
                         status = "Looking Down";
                     }
+                } else if (normalizedPitch < -0.12) {
+                    state.lookingDownStart = null;
+                    rawScore -= 45;
+                    status = "Looking Up";
                 } else {
                     state.lookingDownStart = null;
-                    if (normalizedPitch < -0.15) {
-                        rawScore -= 40;
-                        status = "Looking Up";
-                    }
                 }
 
-                debugInfo = { ear: avgEAR.toFixed(3), yaw: yaw.toFixed(2), pitch: normalizedPitch.toFixed(2) };
+                debugInfo = {
+                    ear: avgEAR.toFixed(3),
+                    yaw: yaw.toFixed(2),
+                    pitch: normalizedPitch.toFixed(2)
+                };
             }
 
             // Clamp score
@@ -596,15 +640,15 @@
 
             // 5. Emit every 1 second
             if (now - state.lastEmitTime >= 1000) {
-                console.log(`[ML] Attention calculated: ${smoothedScore}% (${status})`);
+                console.log(`[ML Telemetry] Score: ${smoothedScore}% | status: ${status} | EAR: ${debugInfo.ear} | Yaw: ${debugInfo.yaw} | Pitch: ${debugInfo.pitch}`);
                 if (socket && socket.connected) {
-                    console.log(`[Socket] Emitting attention-update for room ${state.room}`);
                     socket.emit('attention-update', {
                         userId: state.user.id,
                         room: state.room,
                         attention: smoothedScore,
                         status: status,
-                        student_name: state.user.name
+                        student_name: state.user.name,
+                        metrics: debugInfo
                     });
                 } else {
                     console.warn("[Socket] Not connected. Cannot emit attention.");

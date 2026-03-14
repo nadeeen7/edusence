@@ -1,1203 +1,679 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_file
-from flask_socketio import SocketIO, emit, join_room, leave_room
-from flask_cors import CORS
-import sqlite3
-import json
 import os
-from datetime import datetime
-import hashlib
 import secrets
+import traceback
 import csv
 import io
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify, session, redirect, url_for, render_template, Response
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit, join_room, leave_room
+from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+
+# Local Imports
+from config import Config
+from models import db, Teacher, Student, MonitoringSession, AttentionLog, Alert, MeetingLink, SessionAnalytics
+from auth import generate_token, token_required
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
-# Use a stable secret key to keep sessions valid across server restarts
-app.secret_key = "classroom_live_stable_secret_key_for_persistence"
-# Configure sessions to last 7 days
-from datetime import timedelta
-app.permanent_session_lifetime = timedelta(days=7)
+app.config.from_object(Config)
 
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Initialize Extensions
+origins = [
+    app.config.get('FRONTEND_URL', 'https://192.168.1.5:5173'),
+    'http://localhost:5173',
+    'https://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://127.0.0.1:5173',
+    'http://192.168.1.5:5173',
+    'https://192.168.1.5:5173'
+]
 
-# Track active connections: socket_id -> {student_id, name, room}
-connected_students = {}
-# Track classroom state: room_code -> { "students": { student_id: { name, attention, connected } } }
-classroom_sessions = {}
-# Track disconnection timers for grace period: student_id -> Timer object
+CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
+db.init_app(app)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+
+# --- Internal State ---
+classroom_sessions = {} # { room_code: { students: { id: { name, attention, ... } }, active: bool } }
+connected_students = {} # { sid: { student_id, name, room } }
 disconnection_timers = {}
 
-# Database configuration
-DATABASE = 'classroom.db'
-
-def get_db():
-    """Create database connection"""
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    """Initialize database with tables"""
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    # Create teachers table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS teachers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Create students table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS students (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Create sessions table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS monitoring_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_id TEXT NOT NULL,
-            room_code TEXT,
-            start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            end_time TIMESTAMP,
-            avg_attention REAL,
-            alerts_count INTEGER DEFAULT 0,
-            FOREIGN KEY (student_id) REFERENCES students(id)
-        )
-    ''')
-    
-    # Create attention logs table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS attention_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id INTEGER NOT NULL,
-            student_id TEXT NOT NULL,
-            attention_score REAL NOT NULL,
-            ear_value REAL,
-            mar_value REAL,
-            head_yaw TEXT,
-            head_pitch TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (session_id) REFERENCES monitoring_sessions(id),
-            FOREIGN KEY (student_id) REFERENCES students(id)
-        )
-    ''')
-    
-    # Create alerts table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id INTEGER NOT NULL,
-            student_id TEXT NOT NULL,
-            alert_type TEXT NOT NULL,
-            alert_message TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (session_id) REFERENCES monitoring_sessions(id),
-            FOREIGN KEY (student_id) REFERENCES students(id)
-        )
-    ''')
-    
-    # Create meeting_links table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS meeting_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            link_code TEXT UNIQUE NOT NULL,
-            teacher_id INTEGER NOT NULL,
-            class_name TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            is_active BOOLEAN DEFAULT 1,
-            FOREIGN KEY (teacher_id) REFERENCES teachers(id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-
+# --- Password Helpers ---
 def hash_password(password):
-    """Hash password using SHA-256"""
-    return hashlib.sha256(password.encode()).hexdigest()
+    return generate_password_hash(password)
 
-# Initialize database on startup
-# Routes
+def verify_password(hashed_password, password):
+    return check_password_hash(hashed_password, password)
+
+# --- Routes ---
+
 @app.route('/')
-@app.route('/home.html')
 def index():
-    """Home page"""
-    return render_template('home.html')
+    return jsonify({"status": "Online Attention Detector API is running"}), 200
 
-@app.route('/test.html')
-def test_page():
-    """Test page for debugging"""
-    return render_template('test.html')
-
-@app.route('/register', methods=['GET', 'POST'])
-@app.route('/register.html', methods=['GET', 'POST'])
+@app.route('/register', methods=['POST'])
 def register():
-    """Student registration page"""
-    if request.method == 'POST':
-        try:
-            data = request.json
-            name = data.get('name')
-            email = data.get('email')
-            password = data.get('password')
-            role = data.get('role', 'student')
-            
-            if not all([name, email, password]):
-                return jsonify({'success': False, 'message': 'All fields are required'}), 400
-            
-            conn = get_db()
-            cursor = conn.cursor()
-            
-            if role == 'student':
-                # Generate student ID
-                cursor.execute('SELECT COUNT(*) as count FROM students')
-                count = cursor.fetchone()['count']
-                student_id = f"STU{str(count + 1).zfill(3)}"
-                
-                # Insert student
-                cursor.execute('''
-                    INSERT INTO students (id, name, email, password)
-                    VALUES (?, ?, ?, ?)
-                ''', (student_id, name, email, hash_password(password)))
-                
-            else:  # teacher
-                cursor.execute('''
-                    INSERT INTO teachers (name, email, password)
-                    VALUES (?, ?, ?)
-                ''', (name, email, hash_password(password)))
-            
-            conn.commit()
-            conn.close()
-            
-            return jsonify({'success': True, 'message': 'Registration successful'})
-            
-        except sqlite3.IntegrityError:
-            return jsonify({'success': False, 'message': 'Email already exists'}), 400
-        except Exception as e:
-            return jsonify({'success': False, 'message': str(e)}), 500
-    
-    return render_template('register.html')
-
-@app.route('/student_login', methods=['GET', 'POST'])
-@app.route('/student_login.html', methods=['GET', 'POST'])
-def student_login():
-    """Student login page"""
-    if request.method == 'POST':
-        try:
-            data = request.json
-            email = data.get('email')
-            password = data.get('password')
-            
-            conn = get_db()
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT * FROM students WHERE email = ? AND password = ?
-            ''', (email, hash_password(password)))
-            
-            student = cursor.fetchone()
-            conn.close()
-            
-            if student:
-                session['user_id'] = student['id']
-                session['user_name'] = student['name']
-                session['user_email'] = student['email']
-                session['role'] = 'student'
-                session.permanent = True # Make session persist after browser close/refresh
-                
-                return jsonify({
-                    'success': True,
-                    'user': {
-                        'id': student['id'],
-                        'name': student['name'],
-                        'email': student['email'],
-                        'role': 'student'
-                    }
-                })
-            else:
-                return jsonify({'success': False, 'message': 'Incorrect email or password'}), 401
-                
-        except Exception as e:
-            return jsonify({'success': False, 'message': str(e)}), 500
-    
-    return render_template('student_login.html')
-
-@app.route('/teacher_login', methods=['GET', 'POST'])
-@app.route('/teacher_login.html', methods=['GET', 'POST'])
-def teacher_login():
-    """Teacher login page"""
-    if request.method == 'POST':
-        try:
-            data = request.json
-            email = data.get('email')
-            password = data.get('password')
-            
-            conn = get_db()
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT * FROM teachers WHERE email = ? AND password = ?
-            ''', (email, hash_password(password)))
-            
-            teacher = cursor.fetchone()
-            conn.close()
-            
-            if teacher:
-                session['user_id'] = teacher['id']
-                session['user_name'] = teacher['name']
-                session['user_email'] = teacher['email']
-                session['role'] = 'teacher'
-                session.permanent = True # Make session persist after browser close/refresh
-                
-                return jsonify({
-                    'success': True,
-                    'user': {
-                        'id': teacher['id'],
-                        'name': teacher['name'],
-                        'email': teacher['email'],
-                        'role': 'teacher'
-                    }
-                })
-            else:
-                return jsonify({'success': False, 'message': 'Incorrect email or password'}), 401
-                
-        except Exception as e:
-            return jsonify({'success': False, 'message': str(e)}), 500
-    
-    return render_template('teacher_login.html')
-
-@app.route('/student/classroom')
-@app.route('/student_monitor')
-@app.route('/student_monitor.html')
-def student_monitor():
-    """Student monitoring page"""
-    if 'user_id' not in session or session.get('role') != 'student':
-        return redirect(url_for('student_login'))
-    
-    room_code = request.args.get('code', '').upper()
-    if not room_code:
-        return redirect(url_for('student_dashboard'))
-        
-    # Validate room existence and status
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM meeting_links WHERE UPPER(link_code) = ? AND is_active = 1', (room_code,))
-        room = cursor.fetchone()
-        conn.close()
-        
-        if not room:
-            # Check in-memory as backup 
-            if room_code not in classroom_sessions:
-                print(f"DEBUG: Room {room_code} not found in DB or memory.")
-                return redirect(url_for('student_dashboard', error='invalid_room'))
-    except Exception as e:
-        print(f"Error validating room {room_code}: {e}")
-        
-    return render_template('student_monitor.html')
-
-@app.route('/teacher_dashboard')
-@app.route('/teacher_dashboard.html')
-def teacher_dashboard():
-    """Teacher dashboard page"""
-    if 'user_id' not in session or session.get('role') != 'teacher':
-        return redirect(url_for('teacher_login'))
-    return render_template('teacher_dashboard.html')
-
-@app.route('/student_dashboard')
-@app.route('/student_dashboard.html')
-def student_dashboard():
-    """Student dashboard (lobby) page"""
-    if 'user_id' not in session or session.get('role') != 'student':
-        return redirect(url_for('student_login'))
-    return render_template('student_dashboard.html')
-
-@app.route('/api/start_session', methods=['POST'])
-def start_session():
-    """Start a new monitoring session"""
+    """Register student or teacher with hashed password"""
     try:
         data = request.json
-        student_id = data.get('student_id')
-        print(f"DEBUG: start_session call for {student_id} in room: {data.get('room')}")
-        
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE monitoring_sessions
-            SET end_time = CURRENT_TIMESTAMP
-            WHERE student_id = ? AND end_time IS NULL
-        ''', (student_id,))
-        
-        cursor.execute('''
-            INSERT INTO monitoring_sessions (student_id, room_code)
-            VALUES (?, ?)
-        ''', (student_id, data.get('room')))
-        
-        session_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'session_id': session_id})
-        
+        print(f"Registration Attempt: {data}")
+        name = data.get('name')
+        email = data.get('email', '').strip().lower()
+        password = data.get('password')
+        role = data.get('role', 'student')
+
+        if not all([name, email, password]):
+            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
+
+        if Teacher.query.filter_by(email=email).first() or Student.query.filter_by(email=email).first():
+            return jsonify({'success': False, 'message': 'Email already registered'}), 400
+
+        if role == 'teacher':
+            new_user = Teacher(name=name, email=email, password=hash_password(password))
+        else:
+            student_count = Student.query.count()
+            student_id = f"STU{str(student_count + 1).zfill(3)}"
+            new_user = Student(id=student_id, name=name, email=email, password=hash_password(password))
+
+        db.session.add(new_user)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Registration successful'}), 201
+
     except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
 
-@app.route('/api/log_attention', methods=['POST'])
-def log_attention():
-    """Log attention data"""
+@app.route('/login', methods=['POST'])
+def login():
+    """Universal login returning JWT"""
     try:
         data = request.json
-        session_id = data.get('session_id')
-        score = data.get('attention_score')
-        
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO attention_logs 
-            (session_id, student_id, attention_score, ear_value, mar_value, head_yaw, head_pitch)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            session_id,
-            data.get('student_id'),
-            score,
-            data.get('ear_value'),
-            data.get('mar_value'),
-            data.get('head_yaw'),
-            data.get('head_pitch')
-        ))
-        
-        # Update session with current score (simulating real-time)
-        cursor.execute('''
-            UPDATE monitoring_sessions 
-            SET avg_attention = ?
-            WHERE id = ?
-        ''', (score, session_id))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True})
-        
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        email = data.get('email', '').strip().lower()
+        password = data.get('password')
+        role = data.get('role', 'student')
 
-@app.route('/api/log_alert', methods=['POST'])
-def log_alert():
-    """Log an alert to DB (Redundant for UI but kept for history logging)"""
-    try:
-        data = request.json
-        log_attention_to_db(data.get('student_id'), None, data.get('room'), data.get('alert_type'), data.get('alert_message'))
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        user = None
+        if role == 'teacher':
+            user = Teacher.query.filter_by(email=email).first()
+        else:
+            user = Student.query.filter_by(email=email).first()
 
-@app.route('/api/end_session', methods=['POST'])
-def end_session():
-    """End monitoring session"""
-    try:
-        data = request.json
-        session_id = data.get('session_id')
-        avg_attention = data.get('avg_attention')
-        student_id = data.get('student_id')
+        if user and verify_password(user.password, password):
+            token = generate_token(user.id, role)
+            return jsonify({
+                'success': True,
+                'token': token,
+                'user': {
+                    'id': user.id,
+                    'name': user.name,
+                    'email': user.email,
+                    'role': role
+                }
+            }), 200
         
-        conn = get_db()
-        cursor = conn.cursor()
+        # New: Check if the email exists for the OTHER role to provide a helpful error
+        other_role = 'student' if role == 'teacher' else 'teacher'
+        other_user = Student.query.filter_by(email=email).first() if role == 'teacher' else Teacher.query.filter_by(email=email).first()
         
-        # Get student name for notification
-        cursor.execute('SELECT name FROM students WHERE id = ?', (student_id,))
-        student = cursor.fetchone()
-        student_name = student['name'] if student else 'Unknown'
-        
-        cursor.execute('''
-            UPDATE monitoring_sessions 
-            SET end_time = CURRENT_TIMESTAMP, avg_attention = ?
-            WHERE id = ?
-        ''', (avg_attention, session_id))
-        
-        conn.commit()
-        conn.close()
-        
-        # Notify teacher dashboard that student left
-        socketio.emit('student_left', {
-            'student_id': student_id,
-            'student_name': student_name,
-            'timestamp': datetime.now().isoformat()
-        }, room='teacher_room')
-        
-        return jsonify({'success': True})
-        
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-
-
-@app.route('/api/get_students', methods=['GET'])
-def get_students():
-    """Get only students with active monitoring sessions for teacher dashboard"""
-    try:
-        room_arg = request.args.get('room')
-        if room_arg in ['null', 'undefined', 'None', '']:
-            room_arg = None
+        if other_user:
+            return jsonify({
+                'success': False, 
+                'message': f'This email is registered as a {other_role}. Please use the {other_role} login portal.'
+            }), 401
             
-        print(f"DEBUG: get_students API called. Room Arg: {room_arg}")
-
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        # Only get students who have an active monitoring session (end_time IS NULL)
-        cursor.execute('''
-            SELECT 
-                s.id,
-                s.name,
-                s.email,
-                ms.id as session_id,
-                ms.avg_attention,
-                ms.alerts_count,
-                ms.room_code,
-                ms.start_time
-            FROM students s
-            JOIN monitoring_sessions ms ON s.id = ms.student_id
-            WHERE ms.end_time IS NULL AND (ms.room_code = ? OR ? IS NULL)
-            ORDER BY ms.start_time DESC
-        ''', (room_arg, room_arg))
-        
-        students = []
-        for row in cursor.fetchall():
-            students.append({
-                'id': row['id'],
-                'name': row['name'],
-                'email': row['email'],
-                'session_id': row['session_id'],
-                'attention': row['avg_attention'] or 0,
-                'alerts_count': row['alerts_count'] or 0,
-                'start_time': row['start_time']
-            })
-        
-        conn.close()
-        
-        return jsonify({'success': True, 'students': students})
-        
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/get_student_stats/<student_id>', methods=['GET'])
-def get_student_stats(student_id):
-    """Get detailed stats for a specific student"""
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        # Get latest attention logs
-        cursor.execute('''
-            SELECT attention_score, ear_value, mar_value, head_yaw, head_pitch, timestamp
-            FROM attention_logs
-            WHERE student_id = ?
-            ORDER BY timestamp DESC
-            LIMIT 20
-        ''', (student_id,))
-        
-        logs = [dict(row) for row in cursor.fetchall()]
-        
-        # Get recent alerts
-        cursor.execute('''
-            SELECT alert_type, alert_message, timestamp
-            FROM alerts
-            WHERE student_id = ?
-            ORDER BY timestamp DESC
-            LIMIT 10
-        ''', (student_id,))
-        
-        alerts = [dict(row) for row in cursor.fetchall()]
-        
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'logs': logs,
-            'alerts': alerts
-        })
-        
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/logout')
-def logout():
-    """Logout user"""
-    session.clear()
-    return redirect(url_for('index'))
-
-@app.route('/api/generate_meeting_link', methods=['POST'])
-def generate_meeting_link():
-    """Generate unique meeting link for teacher"""
-    try:
-        data = request.json
-        teacher_id = data.get('teacher_id')
-        class_name = data.get('class_name', 'Classroom')
-        
-        # Generate unique link code
-        link_code = secrets.token_urlsafe(8)
-        
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO meeting_links (link_code, teacher_id, class_name)
-            VALUES (?, ?, ?)
-        ''', (link_code, teacher_id, class_name))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'link_code': link_code,
-            'meeting_url': f'/join/{link_code}'
-        })
-        
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/validate_room', methods=['GET'])
-def validate_room():
-    """Check if a room ID exists and is active"""
-    room_code = request.args.get('code', '').upper()
-    print(f"DEBUG: Validating room: {room_code}")
-    
-    if not room_code:
-        return jsonify({'valid': False, 'message': 'Room code required'}), 400
+@token_required
+def validate_room(current_user):
+    room_code = request.args.get('code', '').strip().upper()
+    room = MeetingLink.query.filter_by(link_code=room_code).first()
+    if room and room.is_active:
+        return jsonify({'valid': True, 'class_name': room.class_name})
+    return jsonify({'valid': False, 'message': 'Invalid or inactive Room ID'}), 404
+
+@app.route('/api/dashboard/stats', methods=['GET'])
+@token_required
+def get_dashboard_stats(current_user):
+    if not isinstance(current_user, Teacher):
+        return jsonify({'success': False, 'message': 'Teacher access required'}), 403
         
     try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM meeting_links WHERE UPPER(link_code) = ? AND is_active = 1', (room_code,))
-        room = cursor.fetchone()
-        conn.close()
+        total_students = Student.query.count()
         
-        if room:
-            print(f"DEBUG: Room {room_code} found in DB.")
-            return jsonify({'valid': True})
+        # Get all meeting links for this teacher
+        all_meetings = MeetingLink.query.filter_by(teacher_id=current_user.id).order_by(MeetingLink.created_at.desc()).all()
         
-        # Check in-memory as backup
-        if room_code in classroom_sessions:
-            print(f"DEBUG: Room {room_code} found in memory.")
-            return jsonify({'valid': True})
-            
-        print(f"DEBUG: Room {room_code} NOT found.")
-        return jsonify({'valid': False, 'message': 'Invalid Room ID. Please check the Room ID and try again.'}), 404
-        
-    except Exception as e:
-        return jsonify({'valid': False, 'message': str(e)}), 500
+        last_class_room = None
+        if all_meetings:
+            # If the first one is active, the "Last Class" is the second one.
+            # Otherwise, the first one is the "Last Class".
+            if all_meetings[0].is_active and len(all_meetings) > 1:
+                last_class_room = all_meetings[1]
+            elif not all_meetings[0].is_active:
+                last_class_room = all_meetings[0]
 
-@app.route('/api/get_recent_alerts', methods=['GET'])
-def get_recent_alerts():
-    """API for alerts is now deprecated for UI"""
-    return jsonify({'success': True, 'alerts': []})
+        # Initialize defaults
+        last_class_stats = {
+            "duration": 0,
+            "studentsCount": 0,
+            "avgAttention": 0,
+            "bestStudent": "N/A",
+            "needsImprovement": "N/A"
+        }
+
+        # Find the most recently completed session for this teacher
+        last_analytics = SessionAnalytics.query.filter_by(teacher_id=current_user.id)\
+            .order_by(SessionAnalytics.timestamp.desc()).first()
+        
+        if last_analytics:
+            latest_session_id = last_analytics.session_id
+            
+            # Get all records for that exact session_id (one row per student)
+            session_group = db.session.query(SessionAnalytics).filter_by(
+                teacher_id=current_user.id, 
+                session_id=latest_session_id
+            ).all()
+            
+            print(f"[DEBUG] Dashboard: teacher={current_user.id}, latest_session_id={latest_session_id}, students_in_group={len(session_group) if session_group else 0}", flush=True)
+                
+            if session_group:
+                last_class_stats["studentsCount"] = len(session_group)
+                last_class_stats["avgAttention"] = round(sum(s.overall_attention for s in session_group) / len(session_group))
+                last_class_stats["duration"] = session_group[0].class_duration
+                
+                sorted_sessions = sorted(session_group, key=lambda x: x.overall_attention, reverse=True)
+                last_class_stats["bestStudent"] = f"{sorted_sessions[0].student_name} – {round(sorted_sessions[0].overall_attention)}%"
+                last_class_stats["needsImprovement"] = f"{sorted_sessions[-1].student_name} – {round(sorted_sessions[-1].overall_attention)}%"
+
+        # Current live session stats (already partially implemented)
+        room_code = request.args.get('room')
+        if not room_code and all_meetings and all_meetings[0].is_active:
+            room_code = all_meetings[0].link_code
+
+        active_count = 0
+        current_class_avg = 0
+        status = "Inactive"
+        highest_attn_str = "N/A"
+        lowest_attn_str = "N/A"
+
+        if room_code and room_code in classroom_sessions:
+            room_data = classroom_sessions[room_code]
+            active_students = [s for sid, s in room_data["students"].items() if s.get('connected')]
+            active_count = len(active_students)
+            if active_count > 0:
+                current_class_avg = round(sum(s['attention'] for s in active_students) / active_count)
+                
+                # Sorted for best/worst in CURRENT session
+                sorted_by_attn = sorted(active_students, key=lambda x: x['attention'], reverse=True)
+                highest_attn_str = f"{sorted_by_attn[0]['name']} – {sorted_by_attn[0]['attention']}%"
+                lowest_attn_str = f"{sorted_by_attn[-1]['name']} – {sorted_by_attn[-1]['attention']}%"
+                
+            status = "Active" if room_data.get('active') else "Ended"
+
+        # Update lastClassStats with distraction count
+        if last_analytics and 'session_group' in locals() and 'session_group' in vars():
+            last_class_stats["totalDistractions"] = sum(getattr(s, 'distraction_count', 0) for s in session_group)
+        elif last_analytics:
+             # Try to find session_group if it wasn't already calculated
+             latest_ts = last_analytics.timestamp
+             # We can't easily re-calculate session_group here without re-querying or restructuring.
+             # Let's just use the single last_analytics distraction count as fallback if group fails.
+             last_class_stats["totalDistractions"] = getattr(last_analytics, 'distraction_count', 0)
+        else:
+            last_class_stats["totalDistractions"] = 0
+
+        # New minimal stats for professional dashboard
+        total_classes = MeetingLink.query.filter_by(teacher_id=current_user.id).count()
+        last_class_date = "N/A"
+        if last_class_room:
+            last_class_date = last_class_room.created_at.strftime("%b %d, %Y")
+
+        # New Perfect Accuracy Attendance:
+        # We count unique student_ids from MonitoringSession for the last session
+        attendance_count = 0
+        if last_class_room:
+            attendance_count = db.session.query(MonitoringSession.student_id)\
+                .filter_by(room_code=last_class_room.link_code)\
+                .distinct().count()
+
+        return jsonify({
+            'success': True,
+            'totalStudents': attendance_count, 
+            'activeStudents': active_count,
+            'classAvg': current_class_avg,
+            'historicalAvg': last_class_stats["avgAttention"],
+            'highestAttention': highest_attn_str,
+            'lowestAttention': lowest_attn_str,
+            'classStatus': status,
+            'chartData': [], # Simplified for classy look
+            'lastClassStats': last_class_stats,
+            'totalClasses': total_classes,
+            'lastClassDate': last_class_date
+        })
+    except Exception as e:
+        print(f"[ERROR] SQL/Dashboard Exception: {str(e)}", flush=True)
+        return jsonify({'success': False, 'message': "Failed to load dashboard statistics"}), 500
 
 @app.route('/api/download_report', methods=['GET'])
-def download_report():
-    """Generate CSV report of all sessions"""
+@token_required
+def download_report(current_user):
+    """Aggregate stats and generate CSV for the most recently completed session"""
+    if not isinstance(current_user, Teacher):
+        return jsonify({'success': False, 'message': 'Teacher access required'}), 403
+        
     try:
-        conn = get_db()
-        cursor = conn.cursor()
+        # Find the most recently completed session for this teacher
+        last_meeting = MeetingLink.query.filter_by(teacher_id=current_user.id, is_active=False)\
+            .order_by(MeetingLink.created_at.desc()).first()
+            
+        print(f"[DEBUG] Download Report - Teacher ID: {current_user.id}, Last Meeting: {last_meeting.id if last_meeting else 'None'}", flush=True)
+            
+        if not last_meeting:
+            return jsonify({'success': False, 'message': 'No completed sessions found'}), 404
+            
+        # Get analytics for this specific session
+        records = SessionAnalytics.query.filter_by(session_id=last_meeting.id, teacher_id=current_user.id).all()
         
-        # Get all completed or active sessions
-        cursor.execute('''
-            SELECT 
-                s.name, 
-                s.email, 
-                ms.start_time, 
-                ms.end_time, 
-                ms.avg_attention, 
-                ms.alerts_count
-            FROM monitoring_sessions ms
-            JOIN students s ON ms.student_id = s.id
-            ORDER BY ms.start_time DESC
-        ''')
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        # CSV Generation
+        if not records:
+            return jsonify({'success': False, 'message': 'No data found for the latest session'}), 404
+            
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(['Student Name', 'Email', 'Start Time', 'End Time', 'Avg Attention (%)', 'Alerts Count'])
         
-        for row in rows:
-            writer.writerow([
-                row['name'],
-                row['email'],
-                row['start_time'],
-                row['end_time'] or 'Active',
-                row['avg_attention'],
-                row['alerts_count']
-            ])
+        # Specified columns
+        writer.writerow(['Student Name', 'Overall Attention (%)', 'Performance'])
+        
+        for r in records:
+            attn = round(r.overall_attention)
+            
+            # Performance Classification
+            if attn >= 80:
+                perf = "Good"
+            elif attn >= 50:
+                perf = "Average"
+            else:
+                perf = "Needs Improvement"
+                
+            writer.writerow([r.student_name, f"{attn}%", perf])
             
         output.seek(0)
-        from flask import Response
         return Response(
-            output,
+            output.getvalue(),
             mimetype="text/csv",
-            headers={"Content-Disposition": "attachment;filename=class_report.csv"}
+            headers={
+                "Content-disposition": f"attachment; filename=class_report_{last_meeting.id}.csv"
+            }
         )
+    except Exception as e:
+        print(f"[ERROR] Report Generation Error: {str(e)}", flush=True)
+        return jsonify({'success': False, 'message': "Failed to generate report"}), 500
+
+@app.route('/api/generate_meeting_link', methods=['POST'])
+@token_required
+def generate_meeting_link(current_user):
+    try:
+        if not isinstance(current_user, Teacher):
+            return jsonify({'success': False, 'message': 'Only teachers can create classes'}), 403
+        data = request.json
+        teacher_id = current_user.id
+        class_name = data.get('class_name', "AI Classroom")
         
+        # Generate unique code
+        link_code = secrets.token_hex(4).upper()
+        new_link = MeetingLink(teacher_id=teacher_id, link_code=link_code, class_name=class_name)
+        db.session.add(new_link)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'link_code': link_code}), 201
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
 
-
-
-@socketio.on('create_class')
-def handle_create_class():
-    """Teacher creates a new unique class session"""
-    room_code = secrets.token_hex(3).upper() # 6 chars
-    
-    # Store in DB for persistence and validation
+@app.route('/api/start_session', methods=['POST'])
+@token_required
+def start_session(current_user):
     try:
-        # We don't have teacher_id here easily from session in socket context sometimes, 
-        # but we can try to get it or just store the code for validation.
-        # Since this is a simple app, we'll store it as active.
-        conn = get_db()
-        cursor = conn.cursor()
-        # Using a dummy teacher_id if not found, or ideally getting it from session
-        teacher_id = session.get('user_id', 1) 
-        cursor.execute('''
-            INSERT INTO meeting_links (link_code, teacher_id, class_name, is_active)
-            VALUES (?, ?, ?, ?)
-        ''', (room_code, teacher_id, 'Classroom Session', 1))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Error persisting room code: {e}")
-
-    join_room(room_code)
-    # Also join a generic teacher room for global ops if needed, but per-room is better
-    emit('class_created', {'code': room_code})
-    return room_code
-
-@socketio.on('teacher_join')
-def handle_teacher_join(data):
-    """Teacher rejoins an existing room (e.g. after refresh)"""
-    room = data.get('room')
-    if not room: return
-    join_room(room)
-    print(f"DEBUG: Teacher rejoined room {room}")
-    emit('class_created', {'code': room})
-
-@socketio.on('join_class')
-def handle_join_class(data):
-    room = data.get('room')
-    student_id = data.get('student_id')
-    student_name = data.get('student_name')
-    if not room or not student_id: return
-    
-    join_room(room)
-    
-    # Track connection
-    connected_students[request.sid] = {
-        'student_id': student_id,
-        'student_name': student_name,
-        'room': room
-    }
-
-    # Initialize in-memory session
-    if room not in classroom_sessions:
-        classroom_sessions[room] = {"students": {}}
-    
-    classroom_sessions[room]["students"][student_id] = {
-        "name": student_name,
-        "attention": 100, # Default to 100 on join
-        "connected": True
-    }
-    
-    print(f"DEBUG: Student {student_name} joined room {room} in-memory.")
-    
-    emit('user_joined', {
-        'id': request.sid, # Socket ID
-        'student_id': student_id,
-        'student_name': student_name
-    }, room=room, include_self=False)
-
-@socketio.on('rejoin_session')
-def handle_rejoin_session(data):
-    """Student rejoins after refresh - reuse same session/ID"""
-    student_id = data.get('student_id')
-    room = data.get('room')
-    if not student_id or not room: return
-    
-    # Cancel any active disconnection timer
-    if student_id in disconnection_timers:
-        disconnection_timers[student_id].cancel()
-        del disconnection_timers[student_id]
-        print(f"DEBUG: Cancelled disconnection timer for {student_id}")
-    
-    join_room(room)
-    connected_students[request.sid] = {
-        'student_id': student_id,
-        'student_name': data.get('student_name'),
-        'room': room
-    }
-    
-    # Notify teacher student is back
-    emit('user_joined', {
-        'id': request.sid,
-        'student_id': student_id,
-        'student_name': data.get('student_name'),
-        'is_reconnect': True
-    }, room=room, include_self=False)
-    
-    print(f"DEBUG: Student {student_id} successfully rejoined room {room}")
-
-@socketio.on('request_sync')
-def handle_request_sync(data):
-    """Teacher requests sync of already connected students"""
-    room = data.get('room')
-    if not room: return
-    
-    # Iterate through all connected students
-    for sid, info in connected_students.items():
-        if info['room'] == room:
-            # Emit user_joined ONLY to the requester (Teacher)
-            emit('user_joined', {
-                'id': sid,
-                'student_id': info['student_id'],
-                'student_name': info['student_name']
-            }, room=request.sid)
-
-@socketio.on('teacher_offer')
-def handle_teacher_offer(data):
-    # Route offer to specific student
-    # data has { 'to': socketId, 'offer': ..., 'room': ... }
-    # Also pass through the sender's (teacher) SID if needed, but not required yet
-    emit('teacher_offer', data, room=data['to'])
-
-@socketio.on('student_answer')
-def handle_student_answer(data):
-    # data has { 'answer': ..., 'room': roomCode, 'student_id': ... }
-    # Route back to the teacher via the room (or specific teacher SID if tracked)
-    # Adding 'from' as request.sid for tracking
-    payload = data.copy()
-    payload['from'] = request.sid
-    emit('student_answer', payload, room=data['room'], include_self=False)
-
-@socketio.on('ice_candidate')
-def handle_ice_candidate(data):
-    # data { 'to': socketId, 'candidate': ..., 'room': ..., 'student_id': ... }
-    payload = data.copy()
-    payload['from'] = request.sid
-    
-    if 'to' in data:
-        emit('ice_candidate', payload, room=data['to'])
-    else:
-        emit('ice_candidate', payload, room=data['room'], include_self=False)
-
-@socketio.on('teacher-stream')
-def handle_teacher_stream(data):
-    room = data.get('room')
-    emit('teacher-stream', data, room=room, include_self=False)
-
-@socketio.on('student_leave')
-def handle_student_leave(data):
-    """Student is leaving the class voluntarily"""
-    student_id = data.get('student_id')
-    student_name = data.get('student_name')
-    room = data.get('room')
-
-    if request.sid in connected_students:
-        tracked = connected_students[request.sid]
-        student_id = student_id or tracked.get('student_id')
-        student_name = student_name or tracked.get('student_name')
-        room = room or tracked.get('room')
-
-    # Process final disconnect immediately
-    finalize_student_disconnect(student_id, student_name, room)
-
-    if request.sid in connected_students:
-        del connected_students[request.sid]
-
-def finalize_student_disconnect(student_id, student_name, room):
-    """Final source of truth for student departure cleanup"""
-    if not room or not student_id: return
-
-    # 1. Update DB (Safety net if not already done)
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE monitoring_sessions
-            SET end_time = CURRENT_TIMESTAMP
-            WHERE student_id = ? AND end_time IS NULL
-        ''', (student_id,))
-        conn.commit()
-        conn.close()
-    except: pass
-
-    # 2. Update In-Memory State
-    if room in classroom_sessions:
-        if student_id in classroom_sessions[room]["students"]:
-            classroom_sessions[room]["students"][student_id]["connected"] = False
-            recalculate_and_broadcast_stats(room)
-
-    # 3. Notify Teacher Dashboard for DOM Cleanup
-    socketio.emit('student_left', {
-        'student_id': student_id,
-        'student_name': student_name,
-        'timestamp': datetime.now().isoformat(),
-        'is_final': True
-    }, room=room)
-
-    # 4. Cleanup Timers
-    if student_id in disconnection_timers:
-        del disconnection_timers[student_id]
-
-    #finalize_student_disconnect handled by timer or explicit leave now.
-    pass
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Handle unexpected disconnections with grace period"""
-    if request.sid in connected_students:
-        user = connected_students[request.sid]
-        student_id = user['student_id']
-        room = user['room']
-        student_name = user['student_name']
-
-        # 1. Notify teacher immediately that student is "reconnecting"
-        socketio.emit('student_reconnecting', {
-            'student_id': student_id,
-            'student_name': student_name,
-            'timestamp': datetime.now().isoformat()
-        }, room=room)
-
-        # 2. Start grace period timer (15 seconds)
-        import threading
-        timer = threading.Timer(15.0, finalize_student_disconnect, [student_id, student_name, room])
-        disconnection_timers[student_id] = timer
-        timer.start()
-
-        # 3. Clean up socket registry (but keep DB session open for now)
-        del connected_students[request.sid]
-
-@socketio.on('kick_student')
-def handle_kick_student(data):
-    """Teacher kicks a student"""
-    student_id = data.get('student_id')
-    room = data.get('room')
-
-    # Find target socket ID for the student in this room.
-    target_sid = None
-    for sid, info in connected_students.items():
-        if info.get('student_id') == student_id and (not room or info.get('room') == room):
-            target_sid = sid
-            room = room or info.get('room')
-            break
-
-    # Close session in DB
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE monitoring_sessions
-            SET end_time = CURRENT_TIMESTAMP
-            WHERE student_id = ? AND end_time IS NULL
-        ''', (student_id,))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Error closing session for kicked student: {e}")
-
-    # Notify only the targeted student.
-    if target_sid:
-        socketio.emit('kicked', {'message': 'You have been removed from the class.'}, room=target_sid)
-        student_name = connected_students[target_sid].get('student_name')
-        del connected_students[target_sid]
-    else:
-        student_name = 'Student'
-
-    # In-memory cleanup
-    if room and student_id and room in classroom_sessions:
-        if student_id in classroom_sessions[room]["students"]:
-            classroom_sessions[room]["students"][student_id]["connected"] = False
-            recalculate_and_broadcast_stats(room)
-
-    # Notify teacher dashboard for immediate UI cleanup.
-    if room:
-        socketio.emit('student_left', {
-            'student_id': student_id,
-            'student_name': student_name,
-            'timestamp': datetime.now().isoformat(),
-            'is_final': True
-        }, room=room)
-
-def log_attention_to_db(student_id, score, room=None, alert_type=None, message=None, status=None):
-    """Helper to log attention and alerts to database"""
-    if not student_id: return
-    
-    conn = None
-    try:
-        normalized_score = None
-        if score is not None:
-            try:
-                normalized_score = max(0.0, min(100.0, float(score)))
-            except (TypeError, ValueError):
-                normalized_score = None
-
-        conn = get_db()
-        cursor = conn.cursor()
-
-        # Find the latest active session for this student.
-        if room:
-            cursor.execute('''
-                SELECT id, room_code FROM monitoring_sessions
-                WHERE student_id = ? AND end_time IS NULL
-                AND (room_code = ? OR room_code IS NULL)
-                ORDER BY id DESC LIMIT 1
-            ''', (student_id, room))
-        else:
-            cursor.execute('''
-                SELECT id, room_code FROM monitoring_sessions
-                WHERE student_id = ? AND end_time IS NULL
-                ORDER BY id DESC LIMIT 1
-            ''', (student_id,))
-
-        active_session = cursor.fetchone()
-        if not active_session: return
-
-        session_id = active_session['id']
-        room = room or active_session['room_code']
-
-        if normalized_score is not None:
-            cursor.execute('''
-                INSERT INTO attention_logs (session_id, student_id, attention_score)
-                VALUES (?, ?, ?)
-            ''', (session_id, student_id, normalized_score))
-            cursor.execute('''
-                UPDATE monitoring_sessions SET avg_attention = ? WHERE id = ?
-            ''', (normalized_score, session_id))
-
-        if (alert_type and message) or (status and status != 'Focused'):
-            final_alert_type = alert_type or 'Behavior'
-            final_message = message or f"Status: {status}"
+        if not isinstance(current_user, Student):
+            return jsonify({'success': False, 'message': 'Only students can join sessions'}), 403
+        data = request.json
+        student_id = current_user.id
+        room = data.get('room')
+        
+        if not room:
+            return jsonify({'success': False, 'message': 'Room code required'}), 400
             
-            cursor.execute('''
-                INSERT INTO alerts (session_id, student_id, alert_type, alert_message)
-                VALUES (?, ?, ?, ?)
-            ''', (session_id, student_id, final_alert_type, final_message))
-            cursor.execute('''
-                UPDATE monitoring_sessions SET alerts_count = alerts_count + 1 WHERE id = ?
-            ''', (session_id,))
-
-        conn.commit()
+        # Check if session already exists
+        session_rec = MonitoringSession.query.filter_by(student_id=student_id, room_code=room, end_time=None).first()
+        if not session_rec:
+            session_rec = MonitoringSession(student_id=student_id, room_code=room)
+            db.session.add(session_rec)
+            db.session.commit()
+            
+        return jsonify({'success': True, 'session_id': session_rec.id}), 200
     except Exception as e:
-        print(f"Error logging attention to DB: {e}")
-    finally:
-        if conn: conn.close()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
-def recalculate_and_broadcast_stats(room):
-    """Single source of truth for dashboard statistics"""
-    if room not in classroom_sessions: return
-    
-    students = classroom_sessions[room]["students"]
-    active_students = [s for s in students.values() if s.get('connected')]
-    
-    active_count = len(active_students)
-    class_avg = round(sum(s['attention'] for s in active_students) / active_count) if active_count > 0 else 0
-    low_count = len([s for s in active_students if 40 <= s['attention'] < 70])
-    critical_count = len([s for s in active_students if s['attention'] < 40])
-    
-    # Broadcast to Teacher Dashboard
-    socketio.emit('dashboard_update', {
-        'active_count': active_count,
-        'class_avg': class_avg,
-        'low_count': low_count,
-        'critical_count': critical_count,
-        'students': [
-            {
-                'id': sid,
-                'name': s['name'],
-                'attention': s['attention'],
-                'connected': s['connected'],
-                'status': s.get('status', 'Focused')
-            } for sid, s in students.items() if s.get('connected')
-        ]
-    }, room=room)
+@app.route('/api/end_session', methods=['POST'])
+@token_required
+def end_session_rest(current_user):
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({'success': False, 'message': 'Session ID required'}), 400
+            
+        session_rec = MonitoringSession.query.get(session_id)
+        if session_rec:
+            session_rec.end_time = db.func.current_timestamp()
+            db.session.commit()
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/get_student_stats/<student_id>', methods=['GET'])
+@token_required
+def get_student_stats(current_user, student_id):
+    try:
+        logs = AttentionLog.query.filter_by(student_id=student_id).order_by(AttentionLog.timestamp.desc()).limit(10).all()
+        return jsonify({
+            'success': True,
+            'logs': [{'attention_score': l.attention_score, 'timestamp': l.timestamp.isoformat()} for l in logs]
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# --- Socket.IO Handlers ---
+
+@socketio.on('join_room')
+def handle_join_room(data):
+    room = data.get('room', '').strip().upper()
+    role = data.get('role', 'student')
+    user_id = str(data.get('student_id') or data.get('teacher_id'))
+    user_name = data.get('student_name') or data.get('teacher_name') or "User"
+
+    if not room or not user_id: return
+
+    join_room(room)
+    if room not in classroom_sessions:
+        classroom_sessions[room] = {"students": {}, "active": True, "history": []}
+
+    if role == 'teacher':
+        join_room(room)
+        classroom_sessions[room]["teacher_sid"] = request.sid
+        emit('room_joined', {'room': room, 'role': 'teacher'})
+        emit('teacher_joined', {'teacher_id': user_id, 'teacher_name': user_name}, room=room, include_self=False)
+        recalculate_and_broadcast_stats(room, include_students=True)
+    else:
+        join_room(room)
+        connected_students[request.sid] = {'student_id': user_id, 'name': user_name, 'room': room}
+        classroom_sessions[room]["students"][user_id] = {
+            "name": user_name,
+            "attention": 100,
+            "connected": True,
+            "status": "Focused",
+            "hand_raised": False
+        }
+        emit('room_joined', {'room': room, 'role': 'student'})
+        emit('user_joined', {'id': request.sid, 'student_id': user_id, 'student_name': user_name}, room=room, include_self=False)
+        recalculate_and_broadcast_stats(room, include_students=True)
 
 @socketio.on('attention_update')
 @socketio.on('attention-update')
 def handle_attention_update(data):
-    """Real-time attention heartbeat from student (Single Source of Truth)"""
     room = data.get('room')
-    student_id = data.get('student_id') or data.get('userId')
+    student_id = str(data.get('student_id'))
     attention = data.get('attention', 0)
-    student_name = data.get('student_name', 'Student')
-    status = data.get('status', 'Focused')
+    status = data.get('status', 'Unknown')
     
-    if not room or not student_id: 
-        print(f"DEBUG ERROR: Missing data in attention update: {data}")
-        return
-    
-    # print(f"DEBUG: Attention update from {student_id} in {room}: {attention}% ({status})")
-    
-    # Update in-memory state
-    if room not in classroom_sessions:
-        classroom_sessions[room] = {"students": {}}
+    if room in classroom_sessions:
+        if student_id not in classroom_sessions[room]['students']:
+            classroom_sessions[room]['students'][student_id] = {
+                'name': data.get('student_name', 'Unknown'),
+                'attention': attention,
+                'status': status,
+                'connected': True,
+                'last_seen': datetime.now(),
+                'hand_raised': False
+            }
+        else:
+            student = classroom_sessions[room]['students'][student_id]
+            student['attention'] = attention
+            student['status'] = status
+            student['last_seen'] = datetime.now()
+            student['connected'] = True
+
+        # Broadcast update to teacher
+        emit('attention-update', {
+            'student_id': student_id,
+            'attention': attention,
+            'status': status,
+            'hand_raised': classroom_sessions[room]['students'][student_id].get('hand_raised', False)
+        }, room=room)
         
-    # Update WITHOUT overwriting existing metadata like 'sid'
-    if student_id not in classroom_sessions[room]["students"]:
-        classroom_sessions[room]["students"][student_id] = {
-            "name": student_name,
-            "connected": True
-        }
-    
-    s_data = classroom_sessions[room]["students"][student_id]
-    s_data.update({
-        "attention": attention,
-        "status": status,
-        "connected": True
-    })
+        # Broadcast dashboard stats
+        recalculate_and_broadcast_stats(room, include_students=True)
 
-    # 1. Relay the individual update to the room (Teacher will catch it)
-    socketio.emit('attention-update', {
-        'userId': student_id,
-        'userName': student_name,
-        'attention': attention,
-        'status': status
-    }, room=room)
-
-    # 2. Recalculate and push full dashboard update
-    recalculate_and_broadcast_stats(room)
-
-    # Optional: Periodic DB Log
-    log_attention_to_db(student_id, attention, room, status=status)
-
-@socketio.on('monitor_control')
-def handle_monitor_control(data):
-    """Teacher controls student state (mute/video off) or kicks"""
+@socketio.on('raise_hand')
+def handle_raise_hand(data):
     room = data.get('room')
-    action = data.get('action')
+    student_id = str(data.get('student_id'))
+    is_raised = data.get('is_raised', True)
+    
+    if room in classroom_sessions and student_id in classroom_sessions[room]['students']:
+        classroom_sessions[room]['students'][student_id]['hand_raised'] = is_raised
+        
+        # Notify teacher
+        emit('student_raised_hand', {
+            'student_id': student_id,
+            'student_name': classroom_sessions[room]['students'][student_id]['name'],
+            'is_raised': is_raised
+        }, room=room)
+        
+        print(f"[INFO] Student {student_id} {'raised' if is_raised else 'lowered'} hand in {room}", flush=True)
+        recalculate_and_broadcast_stats(room, include_students=True)
+
+@socketio.on('media_state_change')
+def handle_media_state_change(data):
+    room = data.get('room')
+    student_id = str(data.get('student_id'))
+    
+    if room in classroom_sessions and student_id in classroom_sessions[room]['students']:
+        classroom_sessions[room]['students'][student_id]['video_enabled'] = data.get('videoEnabled', True)
+        classroom_sessions[room]['students'][student_id]['audio_enabled'] = data.get('audioEnabled', True)
+        
+        emit('media_state_change', {
+            'student_id': student_id,
+            'videoEnabled': data.get('videoEnabled', True),
+            'audioEnabled': data.get('audioEnabled', True)
+        }, room=room)
+
+
+@socketio.on('request_sync')
+def handle_request_sync(data):
+    room = data.get('room')
+    if room in classroom_sessions:
+        recalculate_and_broadcast_stats(room, include_students=True)
+
+@socketio.on('kick_student')
+def handle_kick(data):
+    room = data.get('room')
     student_id = data.get('student_id')
-    
-    if action == 'kick_student':
-        handle_kick_student(data)
-    else:
-        emit('monitor_control', data, room=room)
-
-@socketio.on('student_control_sync')
-def handle_student_control_sync(data):
-    """Broadcast student mic/cam status to the room"""
-    room = data.get('room')
-    if room:
-        emit('student_control_sync', data, room=room, include_self=False)
+    if room and student_id:
+        # Find the specific SID for this student_id in this room
+        target_sid = None
+        for sid, info in connected_students.items():
+            if info['student_id'] == student_id and info['room'] == room:
+                target_sid = sid
+                break
+        
+        if target_sid:
+            emit('kicked', {'message': 'You have been removed.'}, room=target_sid)
+            print(f"[INFO] Student {student_id} kicked from room {room}")
 
 @socketio.on('end_class')
+@socketio.on('end_session')
 def handle_end_class(data):
-    """Teacher ends the class via Socket.IO"""
     room = data.get('room')
     if not room: return
-    
-    # Optional security: Verify requester is the teacher for this room
-    # For now, we proceed with broad cleanup
-    
     try:
-        conn = get_db()
-        cursor = conn.cursor()
+        # Get teacher_id from room
+        meeting = MeetingLink.query.filter_by(link_code=room).first()
+        if not meeting: return
         
-        # 1. End all sessions in this room
-        cursor.execute('''
-            UPDATE monitoring_sessions 
-            SET end_time = CURRENT_TIMESTAMP
-            WHERE room_code = ? AND end_time IS NULL
-        ''', (room,))
-        
-        # Deactivate room code
-        cursor.execute('UPDATE meeting_links SET is_active = 0 WHERE link_code = ?', (room,))
-        
-        conn.commit()
-        conn.close()
-        
-        # 2. Notify all participants in the room
-        socketio.emit('class_ended', {'message': 'Class has ended.'}, room=room)
-        
-        # 3. Confirm to teacher
-        emit('class_ended_confirm', {'success': True}, room=request.sid)
-        
-        # 4. Cleanup in-memory state for this room
-        if room in classroom_sessions:
-            del classroom_sessions[room]
+        current_time = datetime.now()
+        duration_mins = 0
+        if meeting.created_at:
+            duration_mins = int((current_time - meeting.created_at).total_seconds() / 60)
+
+        # Prevent duplicate analytics if end_class is called multiple times
+        existing_analytics = SessionAnalytics.query.filter_by(session_id=meeting.id).first()
+        if existing_analytics:
+            print(f"[INFO] Analytics already saved for meeting {meeting.id}, skipping duplicate creation", flush=True)
+        elif room in classroom_sessions:
+            room_data = classroom_sessions[room]
+            for student_id, s_data in room_data["students"].items():
+                # Check for existing monitoring session to link ID and calculate True Average
+                m_session = MonitoringSession.query.filter_by(student_id=student_id, room_code=room, end_time=None).first()
+                
+                overall_avg = s_data['attention'] # Fallback
+                session_id_val = 0
+                
+                if m_session:
+                    session_id_val = m_session.id
+                    # Calculate true average from AttentionLog
+                    logs = AttentionLog.query.filter_by(session_id=m_session.id).all()
+                    if logs:
+                        overall_avg = sum(l.attention_score for l in logs) / len(logs)
+                    
+                    m_session.end_time = current_time
+                    m_session.avg_attention = overall_avg
+
+                # Count distractions for this student/session
+                distraction_count = Alert.query.filter_by(session_id=session_id_val).count() if session_id_val else 0
+
+                # Save to SessionAnalytics — one row per student per session
+                analysis = SessionAnalytics(
+                    session_id=meeting.id, # Use MeetingLink.id for grouping
+                    teacher_id=meeting.teacher_id,
+                    student_name=s_data['name'],
+                    overall_attention=overall_avg,
+                    class_duration=duration_mins,
+                    distraction_count=distraction_count
+                )
+                db.session.add(analysis)
             
+            room_data["active"] = False
+        
+        # Also mark room inactive if it exists but analytics were already saved
+        if room in classroom_sessions:
+            classroom_sessions[room]["active"] = False
+
+        # Close all active sessions for this room
+        MonitoringSession.query.filter_by(room_code=room, end_time=None).update({
+            "end_time": current_time
+        })
+        meeting.is_active = False
+        db.session.commit()
+        
+        socketio.emit('class_ended', {'message': 'Class has ended.'}, room=room)
+        print(f"[INFO] Room {room} ended and analytics saved", flush=True)
     except Exception as e:
-        print(f"Error ending class {room}: {e}")
-        emit('class_ended_confirm', {'success': False, 'error': str(e)}, room=request.sid)
+        db.session.rollback()
+        print(f"[ERROR] Failed to end class {room}: {str(e)}", flush=True)
 
-@app.route('/api/end_all_sessions', methods=['POST'])
-def end_all_sessions():
-    """End all active monitoring sessions"""
-    if 'user_id' not in session or session.get('role') != 'teacher':
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        UPDATE monitoring_sessions 
-        SET end_time = CURRENT_TIMESTAMP
-        WHERE end_time IS NULL
-    ''')
-    
-    # Deactivate all rooms
-    cursor.execute('UPDATE meeting_links SET is_active = 0')
-    
-    conn.commit()
-    conn.close()
-    
-    # Broadcast to ALL connected clients to stop
-    socketio.emit('class_ended', {'message': 'Class has ended.'})
-    
-    return jsonify({'success': True, 'message': 'All sessions ended successfully'})
+@socketio.on('disconnect')
+def handle_disconnect():
+    if request.sid in connected_students:
+        info = connected_students[request.sid]
+        student_id = info['student_id']
+        room = info['room']
+        if room in classroom_sessions and student_id in classroom_sessions[room]["students"]:
+            classroom_sessions[room]["students"][student_id]["connected"] = False
+            recalculate_and_broadcast_stats(room, include_students=True)
+            socketio.emit('student_left', {'student_id': student_id}, room=room)
+        del connected_students[request.sid]
 
-# Error handlers
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Not found'}), 404
+# WebRTC Signaling
+@socketio.on('teacher_offer')
+def handle_offer(data): emit('teacher_offer', data, room=data['to'])
 
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({'error': 'Internal server error'}), 500
+@socketio.on('student_answer')
+def handle_answer(data): emit('student_answer', data, room=data['room'], include_self=False)
+
+@socketio.on('ice_candidate')
+def handle_ice(data):
+    if 'to' in data: emit('ice_candidate', data, room=data['to'])
+    else: emit('ice_candidate', data, room=data['room'], include_self=False)
+
+def recalculate_and_broadcast_stats(room, include_students=False):
+    if room not in classroom_sessions: return
+    students = classroom_sessions[room]["students"]
+    active_students = [s for sid, s in students.items() if s.get('connected')]
+    active_count = len(active_students)
+    
+    # Calculate average only for connected students
+    class_avg = 0
+    if active_count > 0:
+        class_avg = round(sum(s['attention'] for s in active_students) / active_count)
+    
+    low_count = len([s for s in active_students if s['attention'] < 60])
+    critical_count = len([s for s in active_students if s['attention'] < 40])
+    
+    highest = "N/A"
+    lowest = "N/A"
+    if active_students:
+        sorted_students = sorted(active_students, key=lambda x: x['attention'], reverse=True)
+        highest = f"{sorted_students[0]['name']} - {sorted_students[0]['attention']}%"
+        lowest = f"{sorted_students[-1]['name']} - {sorted_students[-1]['attention']}%"
+
+    payload = {
+        'active_count': active_count,
+        'class_avg': class_avg,
+        'low_count': low_count,
+        'critical_count': critical_count,
+        'highest_attention': highest,
+        'lowest_attention': lowest,
+        'status': 'Active' if classroom_sessions[room].get('active') else 'Ended'
+    }
+    if include_students:
+        payload['students'] = [
+            {'id': sid, 'name': s['name'], 'attention': s['attention'], 'status': s['status']} 
+            for sid, s in students.items() if s.get('connected')
+        ]
+    
+    # Debug log for server activity
+    print(f"[DEBUG] Room {room} Stats: {active_count} active, {class_avg}% avg", flush=True)
+    socketio.emit('dashboard_update', payload, room=room)
+
+def log_attention_to_db(student_id, score, room, status=None):
+    try:
+        session_rec = MonitoringSession.query.filter_by(student_id=student_id, room_code=room, end_time=None).first()
+        if not session_rec:
+            session_rec = MonitoringSession(student_id=student_id, room_code=room)
+            db.session.add(session_rec)
+            db.session.flush()
+        log = AttentionLog(session_id=session_rec.id, student_id=student_id, attention_score=score)
+        db.session.add(log)
+        session_rec.avg_attention = score
+        if status and status != 'Focused':
+            alert = Alert(session_id=session_rec.id, student_id=student_id, alert_type='Behavior', alert_message=f"Status: {status}")
+            db.session.add(alert)
+            session_rec.alerts_count = (session_rec.alerts_count or 0) + 1
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
 
 if __name__ == '__main__':
-    # Initialize DB on start
-    init_db()
-        
-    # Cleanup stale sessions (older than 12 hours)
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE monitoring_sessions SET end_time = CURRENT_TIMESTAMP WHERE end_time IS NULL AND start_time < datetime('now', '-12 hours')")
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Cleanup error: {e}")
+    with app.app_context():
+        db.create_all()
+    socketio.run(app, debug=False, host='0.0.0.0', port=5000)
 
-    # Start server
-    use_ssl = os.path.exists('key.pem') and os.path.exists('cert.pem')
-    protocol = "https" if use_ssl else "http"
-    print(f"\n--- SERVER STARTING ---")
-    print(f"Access link: {protocol}://localhost:5000")
-    print(f"-----------------------\n")
-
-    if use_ssl:
-        socketio.run(app, debug=True, host='0.0.0.0', port=5000, keyfile='key.pem', certfile='cert.pem')
-    else:
-        socketio.run(app, debug=True, host='0.0.0.0', port=5000)
-
+@app.route('/api/log_error', methods=['POST'])
+def log_error():
+    print("REACT CRASH DETECTED =>", request.json, flush=True)
+    return jsonify({"success": True}), 200
