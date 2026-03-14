@@ -34,7 +34,7 @@ origins = [
 
 CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
 db.init_app(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # --- Internal State ---
 classroom_sessions = {} # { room_code: { students: { id: { name, attention, ... } }, active: bool } }
