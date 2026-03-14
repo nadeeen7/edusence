@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Card from "../components/Card";
 import Notification from "../components/Notification";
 import api from "../services/api";
@@ -10,6 +10,7 @@ const StudentLogin = () => {
     const [loading, setLoading] = useState(false);
     const [notification, setNotification] = useState(null);
     const navigate = useNavigate();
+    const location = useLocation();
     const { login } = useAuth();
 
     const handleSubmit = async (e) => {
@@ -21,7 +22,7 @@ const StudentLogin = () => {
             if (res.data.success) {
                 setNotification({ type: "success", message: "Login successful!" });
                 login(res.data.user, res.data.token);
-                setTimeout(() => navigate("/student-dashboard"), 1000);
+                setTimeout(() => navigate(`/student-dashboard${location.search}`), 1000);
             }
         } catch (err) {
             const msg = err.response?.data?.message || "Login failed. Please check your credentials.";

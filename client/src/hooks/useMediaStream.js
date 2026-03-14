@@ -13,12 +13,36 @@ export const useMediaStream = () => {
         if (streamRef.current) return streamRef.current;
         if (startingRef.current) return null;
 
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            const errorMsg = "Media devices API not available. Ensure you are using HTTPS.";
+            console.error(errorMsg);
+            setError(errorMsg);
+            return null;
+        }
+
         startingRef.current = true;
         try {
             console.log("Requesting Media Stream...");
             const mediaStream = await navigator.mediaDevices.getUserMedia({
-                video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-                audio: true
+                video: {
+                    width: { min: 640, ideal: 1280 },
+                    height: { min: 480, ideal: 720 },
+                    facingMode: 'user'
+                },
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    // Advanced AEC constraints for Chromium/Safari/Firefox
+                    googEchoCancellation: true,
+                    googAutoGainControl: true,
+                    googNoiseSuppression: true,
+                    googHighpassFilter: true,
+                    googTypingNoiseDetection: true,
+                    googNoiseReduction: true,
+                    channelCount: 1, // Mono helps AEC significantly
+                    latency: 0
+                }
             });
             streamRef.current = mediaStream;
             setHasStream(true);
@@ -26,7 +50,15 @@ export const useMediaStream = () => {
             return mediaStream;
         } catch (err) {
             console.error("Media stream error:", err);
-            setError(err);
+            let userMessage = "Failed to access camera/microphone.";
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                userMessage = "Camera/Microphone permission denied. Please enable them in your browser settings (click the lock icon in the address bar).";
+            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                userMessage = "No camera or microphone found on this device.";
+            } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                userMessage = "Camera or microphone is already in use by another application.";
+            }
+            setError(userMessage);
             return null;
         } finally {
             startingRef.current = false;

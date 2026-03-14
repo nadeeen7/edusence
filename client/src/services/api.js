@@ -1,9 +1,9 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000',
+    baseURL: import.meta.env.VITE_API_URL || '',
     withCredentials: true,
-    timeout: 10000,
+    timeout: 30000,
     headers: {
         'Content-Type': 'application/json'
     }
@@ -37,7 +37,7 @@ api.interceptors.response.use(
         });
 
         if (!error.response) {
-            alert(`Network Error: ${message}. Check server status.`);
+            alert(`Network Error: ${message}. Check if both backend and frontend servers are running.`);
         }
         return Promise.reject(error);
     }

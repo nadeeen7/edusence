@@ -23,10 +23,13 @@ app.config.from_object(Config)
 
 # Initialize Extensions
 origins = [
-    app.config.get('FRONTEND_URL', 'http://localhost:5173'),
+    app.config.get('FRONTEND_URL', 'https://192.168.1.5:5173'),
+    'http://localhost:5173',
+    'https://localhost:5173',
     'http://127.0.0.1:5173',
-    'http://localhost:5174',
-    'http://127.0.0.1:5174'
+    'https://127.0.0.1:5173',
+    'http://192.168.1.5:5173',
+    'https://192.168.1.5:5173'
 ]
 
 CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
@@ -225,19 +228,33 @@ def get_dashboard_stats(current_user):
         else:
             last_class_stats["totalDistractions"] = 0
 
-        chart_data = [0]*9 + [current_class_avg] if active_count > 0 else [0]*10
+        # New minimal stats for professional dashboard
+        total_classes = MeetingLink.query.filter_by(teacher_id=current_user.id).count()
+        last_class_date = "N/A"
+        if last_class_room:
+            last_class_date = last_class_room.created_at.strftime("%b %d, %Y")
+
+        # New Perfect Accuracy Attendance:
+        # We count unique student_ids from MonitoringSession for the last session
+        attendance_count = 0
+        if last_class_room:
+            attendance_count = db.session.query(MonitoringSession.student_id)\
+                .filter_by(room_code=last_class_room.link_code)\
+                .distinct().count()
 
         return jsonify({
             'success': True,
-            'totalStudents': last_class_stats["studentsCount"], # Maps to "Previous Class Attendance"
+            'totalStudents': attendance_count, 
             'activeStudents': active_count,
-            'classAvg': current_class_avg, # Current live average
-            'historicalAvg': last_class_stats["avgAttention"], # For the summary card
-            'highestAttention': highest_attn_str, # Current best
-            'lowestAttention': lowest_attn_str, # Current worst
+            'classAvg': current_class_avg,
+            'historicalAvg': last_class_stats["avgAttention"],
+            'highestAttention': highest_attn_str,
+            'lowestAttention': lowest_attn_str,
             'classStatus': status,
-            'chartData': chart_data,
-            'lastClassStats': last_class_stats
+            'chartData': [], # Simplified for classy look
+            'lastClassStats': last_class_stats,
+            'totalClasses': total_classes,
+            'lastClassDate': last_class_date
         })
     except Exception as e:
         print(f"[ERROR] SQL/Dashboard Exception: {str(e)}", flush=True)

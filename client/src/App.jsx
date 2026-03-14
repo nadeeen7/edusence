@@ -14,12 +14,12 @@ import LiveSession from "./pages/LiveSession";
 
 function App() {
   const location = useLocation();
-  const hideNavbar = ["/monitor"].some(path => location.pathname.startsWith(path));
+  const isFullscreenView = ["/monitor", "/teacher-dashboard"].some(path => location.pathname.startsWith(path));
 
   return (
     <div className="min-h-screen bg-black text-gray-100 font-sans selection:bg-blue-500/30">
-      {!hideNavbar && <Navbar />}
-      <main className={`${hideNavbar ? '' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'}`}>
+      {!isFullscreenView && <Navbar />}
+      <main className={`${isFullscreenView ? 'h-screen w-screen overflow-hidden' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'}`}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/register" element={<Register />} />
@@ -28,7 +28,9 @@ function App() {
 
           <Route path="/teacher-dashboard" element={
             <ProtectedRoute role="teacher">
-              <TeacherDashboard />
+              <ErrorBoundary>
+                <TeacherDashboard />
+              </ErrorBoundary>
             </ProtectedRoute>
           } />
 

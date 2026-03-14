@@ -4,6 +4,7 @@ import { useMediaStream } from '../hooks/useMediaStream';
 import { useSocketSession } from '../hooks/useSocketSession';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Card from '../components/Card';
+import Notification from '../components/Notification';
 import api from '../services/api';
 
 // ─── Draggable PIP Hook ──────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ const StudentMonitor = () => {
     const [endBanner, setEndBanner] = useState(null);
     const [handRaised, setHandRaised] = useState(false);
     const [swapped, setSwapped] = useState(false); // false = teacher big, student PIP
+    const [notification, setNotification] = useState(null);
 
     const pcRef = useRef(null);
     const faceMeshRef = useRef(null);
@@ -99,13 +101,14 @@ const StudentMonitor = () => {
     const mainAreaRef = useRef(null);
 
 
-    // Draggable PIP
-    const { pos: pipPos, isDragging, pipRef, onMouseDown: pipMouseDown, onTouchStart: pipTouchStart } = useDraggable({ x: 24, y: null }, mainAreaRef);
+    // Draggable PIP - Update initial position for mobile
+    const { pos: pipPos, isDragging, pipRef, onMouseDown: pipMouseDown, onTouchStart: pipTouchStart } = useDraggable({ x: 16, y: 16 }, mainAreaRef);
 
     // 1. Media Management
     const {
         stream: studentStream,
         hasStream: hasStudentStream,
+        error: mediaError,
         startStream,
         videoEnabled,
         audioEnabled,
@@ -114,7 +117,9 @@ const StudentMonitor = () => {
     } = useMediaStream();
 
     // 2. Socket Management
-    const { connected, emit, on } = useSocketSession(roomCode, user, 'student');
+    // Delay joining until we at least tried to get media (prevents track-less PC)
+    const activeRoomCode = (hasStudentStream || mediaError) ? roomCode : null;
+    const { connected, emit, on } = useSocketSession(activeRoomCode, user, 'student');
 
     const videoEnabledRef = useRef(videoEnabled);
 
@@ -191,11 +196,13 @@ const StudentMonitor = () => {
                 room: roomCode,
                 attention: smoothed,
                 status: status,
-                student_name: user?.name
+                student_name: user?.name,
+                audioEnabled: audioEnabled,
+                videoEnabled: videoEnabled
             });
             lastEmitRef.current = now;
         }
-    }, [connected, roomCode, user, emit]);
+    }, [connected, roomCode, user, emit, audioEnabled, videoEnabled]);
 
     const initML = useCallback(async () => {
         if (faceMeshRef.current || mlLoopRef.current) return;
@@ -269,9 +276,14 @@ const StudentMonitor = () => {
             }
 
             if (pcRef.current && !tracksAddedRef.current) {
-                console.log("Adding student tracks to existing PC (Post-Stream Load)...");
+                console.log("Adding student tracks to existing PC (Stream became available later)...");
                 studentStream.getTracks().forEach(track => {
-                    pcRef.current.addTrack(track, studentStream);
+                    console.log(`Adding delayed track: ${track.kind} (Enabled: ${track.enabled})`);
+                    const senders = pcRef.current.getSenders();
+                    const trackExists = senders.some(sender => sender.track === track);
+                    if (!trackExists) {
+                        pcRef.current.addTrack(track, studentStream);
+                    }
                 });
                 tracksAddedRef.current = true;
             }
@@ -332,22 +344,46 @@ const StudentMonitor = () => {
                 pcRef.current.close();
                 tracksAddedRef.current = false;
             }
-            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            const pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' }
+                ],
+                iceCandidatePoolSize: 10
+            });
             pcRef.current = pc;
 
+            pc.oniceconnectionstatechange = () => console.log("ICE Connection State:", pc.iceConnectionState);
+            pc.onconnectionstatechange = () => console.log("Peer Connection State:", pc.connectionState);
+
             pc.ontrack = (event) => {
-                console.log("Student received teacher track");
-                setTeacherStream(event.streams[0]);
+                console.log(`Student received teacher track: ${event.track.kind}`);
+                const track = event.track;
+                setTeacherStream(prev => {
+                    const stream = prev || new MediaStream();
+                    if (!stream.getTracks().some(t => t.id === track.id)) {
+                        stream.addTrack(track);
+                    }
+                    return new MediaStream(stream.getTracks()); // New identity to trigger render
+                });
             };
 
             if (studentStreamRef.current) {
-                console.log("Adding local tracks to PC during handshake");
+                console.log("Adding local tracks (Audio + Video) to PC");
                 studentStreamRef.current.getTracks().forEach(track => {
-                    pc.addTrack(track, studentStreamRef.current);
+                    console.log(`Adding track: ${track.kind} (Enabled: ${track.enabled})`);
+                    const senders = pc.getSenders();
+                    const trackExists = senders.some(sender => sender.track === track);
+                    if (!trackExists) {
+                        pc.addTrack(track, studentStreamRef.current);
+                    }
                 });
                 tracksAddedRef.current = true;
             } else {
-                console.error("No student stream available for handshake!");
+                console.warn("No student stream available yet to add to PC");
             }
 
             pc.onicecandidate = (event) => {
@@ -383,6 +419,7 @@ const StudentMonitor = () => {
             setEndBanner("You have been removed from this session.");
             setTimeout(() => navigate('/student-dashboard'), 3000);
         });
+        on('notification', (data) => setNotification(data));
 
         return () => { if (pcRef.current) pcRef.current.close(); };
     }, [connected, emit, navigate, on, roomCode, user?.id, user?.name]);
@@ -404,15 +441,23 @@ const StudentMonitor = () => {
         };
     }, []);
 
-    // Compute PIP style (defaults to bottom-left when no y is set)
-    const pipStyle = pipPos.y !== null
-        ? { position: 'absolute', left: pipPos.x, top: pipPos.y, zIndex: 30 }
-        : { position: 'absolute', left: pipPos.x, bottom: 24, zIndex: 30 };
+    // Compute PIP style - Improved for mobile
+    const pipStyle = {
+        position: 'absolute',
+        left: pipPos.x,
+        top: pipPos.y,
+        zIndex: 30,
+        touchAction: 'none'
+    };
 
     return (
         <div className="fixed inset-0 bg-[#0b1120] text-white flex flex-col z-[100] animate-fade-in">
-
-            {/* Session End Banner */}
+            {(notification || mediaError) && (
+                <div className="absolute top-20 right-6 z-[110]">
+                    {notification && <Notification {...notification} onClose={() => setNotification(null)} />}
+                    {mediaError && <Notification type="error" message={mediaError.toString()} onClose={() => { }} />}
+                </div>
+            )}
             {endBanner && (
                 <div className="absolute inset-0 z-[200] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center space-y-4">
                     <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center border border-red-500/30 mb-2">
@@ -424,50 +469,56 @@ const StudentMonitor = () => {
             )}
 
             {/* Minimal Student Header */}
-            <header className="h-14 border-b border-slate-800 bg-slate-900/50 backdrop-blur-xl flex items-center justify-between px-6 shrink-0 shadow-lg">
-                <div className="flex items-center gap-3">
+            <header className="h-14 border-b border-slate-800 bg-slate-900/50 backdrop-blur-xl flex items-center justify-between px-4 sm:px-6 shrink-0 shadow-lg gap-2">
+                <div className="flex items-center gap-2 sm:gap-3">
                     <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                    <span className="text-[10px] font-black uppercase tracking-widest">{statusMessage}</span>
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest truncate max-w-[150px] sm:max-w-none">{statusMessage}</span>
                 </div>
-                <div className="text-[10px] font-medium text-slate-500 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
+                <div className="text-[9px] sm:text-[10px] font-medium text-slate-500 bg-slate-800/50 px-2 sm:px-3 py-1.5 rounded-full border border-slate-700 whitespace-nowrap">
                     ID: {user?.id}
                 </div>
             </header>
 
             {/* Immersive Main Area */}
-            <main ref={mainAreaRef} className="flex-1 flex p-4 gap-4 overflow-hidden relative">
-                {/* Large Video Area */}
-                <div className="flex-1 bg-black rounded-3xl overflow-hidden relative shadow-2xl border border-white/5 ring-1 ring-white/10 group">
-                    {swapped ? (
-                        /* Student Camera is Big */
-                        <>
-                            <video
-                                ref={mainVideoRef}
-                                autoPlay playsInline muted
-                                className={`w-full h-full object-contain bg-slate-950 scale-x-[-1] ${!videoEnabled ? 'hidden' : ''}`}
-                            />
-                            {!videoEnabled && (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 space-y-4">
-                                    <div className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
-                                        <svg className="w-10 h-10 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+            <main ref={mainAreaRef} className="flex-1 flex flex-col sm:flex-row p-0 sm:p-4 gap-4 overflow-hidden relative">
+                {/* Large Video Area - Always Full Screen */}
+                <div className="flex-1 bg-black rounded-none sm:rounded-3xl overflow-hidden relative shadow-2xl border-b sm:border border-white/5 ring-1 ring-white/10 group">
+                    <div className="w-full h-full relative flex items-center justify-center">
+                        {swapped ? (
+                            /* Student is Big */
+                            <>
+                                <video
+                                    ref={mainVideoRef}
+                                    autoPlay playsInline muted
+                                    className={`w-full h-full object-cover bg-slate-950 scale-x-[-1] ${!videoEnabled ? 'hidden' : ''}`}
+                                />
+                                {!videoEnabled && (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 space-y-4">
+                                        <div className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+                                            <svg className="w-10 h-10 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                                        </div>
+                                        <span className="text-sm font-black text-slate-500 uppercase tracking-widest">Camera Off</span>
                                     </div>
-                                    <span className="text-sm font-black text-slate-500 uppercase tracking-widest">Camera Off</span>
-                                </div>
-                            )}
-                            <div className="absolute top-3 right-3 bg-purple-600/90 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg text-white border border-white/10 shadow-lg">Your Camera</div>
-                        </>
-                    ) : (
-                        /* Teacher Video is Big (default) */
-                        <>
-                            <TeacherVideo stream={teacherStream} />
-                            {!teacherStream && (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4 bg-slate-900/80 backdrop-blur-md">
-                                    <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-                                    <p className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] animate-pulse">Waiting for Teacher Stream...</p>
-                                </div>
-                            )}
-                        </>
-                    )}
+                                )}
+                                <div className="absolute top-3 right-3 bg-purple-600/90 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg text-white border border-white/10 shadow-lg">Your Camera</div>
+                            </>
+                        ) : (
+                            /* Teacher is Big */
+                            <>
+                                <TeacherVideo stream={teacherStream} />
+                                {!teacherStream && (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center space-y-6 bg-slate-900/80 backdrop-blur-md">
+                                        <div className="relative">
+                                            <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+                                            <div className="absolute inset-0 w-16 h-16 border-4 border-transparent border-b-purple-500/40 rounded-full animate-spin-reverse"></div>
+                                        </div>
+                                        <p className="text-sm font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Syncing Teacher Feed...</p>
+                                    </div>
+                                )}
+                                <div className="absolute top-3 right-3 bg-blue-600/90 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg text-white border border-white/10 shadow-lg">Teacher</div>
+                            </>
+                        )}
+                    </div>
                 </div>
 
                 {/* Draggable PIP */}
@@ -476,39 +527,41 @@ const StudentMonitor = () => {
                     style={pipStyle}
                     onMouseDown={pipMouseDown}
                     onTouchStart={pipTouchStart}
-                    className={`w-48 lg:w-64 aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 ring-2 ring-black/50 transition-shadow duration-300 select-none ${isDragging ? 'shadow-blue-500/30 ring-blue-500/50 cursor-grabbing scale-105' : 'cursor-grab hover:shadow-xl hover:ring-white/20'}`}
+                    className={`w-28 sm:w-48 lg:w-64 aspect-video bg-slate-900 rounded-xl overflow-hidden shadow-2xl border border-white/10 ring-2 ring-black/50 transition-shadow duration-300 select-none ${isDragging ? 'shadow-blue-500/30 ring-blue-500/50 cursor-grabbing scale-105' : 'cursor-grab hover:shadow-xl hover:ring-white/20'}`}
                 >
-                    {swapped ? (
-                        /* Teacher is PIP when swapped */
-                        <>
-                            <PipTeacherVideo stream={teacherStream} />
-                            {!teacherStream && (
-                                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 space-y-1">
-                                    <div className="w-6 h-6 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
-                                    <span className="text-[7px] font-black uppercase text-slate-500">Waiting...</span>
-                                </div>
-                            )}
-                            <div className="absolute top-2 left-2 bg-black/50 backdrop-blur px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-white tracking-widest border border-white/5">Teacher</div>
-                        </>
-                    ) : (
-                        /* Student Camera is PIP (default) */
-                        <>
-                            <video
-                                ref={previewVideoRef}
-                                autoPlay playsInline muted
-                                className={`w-full h-full object-cover scale-x-[-1] ${!videoEnabled ? 'hidden' : ''}`}
-                            />
-                            {!videoEnabled && (
-                                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 space-y-2">
-                                    <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-slate-600">
-                                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+                    <div className="w-full h-full relative">
+                        {swapped ? (
+                            /* Teacher is PIP when swapped */
+                            <>
+                                <PipTeacherVideo stream={teacherStream} />
+                                {!teacherStream && (
+                                    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 space-y-2">
+                                        <div className="w-6 h-6 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+                                        <span className="text-[7px] font-black uppercase text-slate-500 tracking-widest">Bridging...</span>
                                     </div>
-                                    <span className="text-[8px] font-black uppercase text-slate-500">Camera Hidden</span>
-                                </div>
-                            )}
-                            <div className="absolute top-2 left-2 bg-black/40 backdrop-blur px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-white tracking-widest border border-white/5">You</div>
-                        </>
-                    )}
+                                )}
+                                <div className="absolute top-2 left-2 bg-black/50 backdrop-blur px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-white tracking-widest border border-white/5">Teacher</div>
+                            </>
+                        ) : (
+                            /* Student Camera is PIP (default) */
+                            <>
+                                <video
+                                    ref={previewVideoRef}
+                                    autoPlay playsInline muted
+                                    className={`w-full h-full object-cover scale-x-[-1] ${!videoEnabled ? 'hidden' : ''}`}
+                                />
+                                {!videoEnabled && (
+                                    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 space-y-2">
+                                        <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-slate-600">
+                                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+                                        </div>
+                                        <span className="text-[8px] font-black uppercase text-slate-500">Camera Hidden</span>
+                                    </div>
+                                )}
+                                <div className="absolute top-2 left-2 bg-black/40 backdrop-blur px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-white tracking-widest border border-white/5">You</div>
+                            </>
+                        )}
+                    </div>
 
                     {/* Drag Handle Indicator */}
                     <div className="absolute bottom-1.5 right-1.5 flex gap-0.5 opacity-40 pointer-events-none">
@@ -525,8 +578,8 @@ const StudentMonitor = () => {
             </main>
 
             {/* Bottom Control Bar — Google Meet Style */}
-            <footer className="h-20 bg-slate-900 border-t border-slate-800 flex items-center justify-center shrink-0">
-                <div className="flex items-center gap-4 bg-slate-800/80 p-2 rounded-2xl border border-slate-700 shadow-xl backdrop-blur-md">
+            <footer className="h-24 sm:h-20 bg-slate-900 border-t border-slate-800 flex items-center justify-center shrink-0 px-2">
+                <div className="flex items-center gap-2 sm:gap-4 bg-slate-800/80 p-2 rounded-2xl border border-slate-700 shadow-xl backdrop-blur-md w-full sm:w-auto justify-center">
                     <ControlButton
                         onClick={handleToggleAudio}
                         active={audioEnabled}
@@ -560,7 +613,7 @@ const StudentMonitor = () => {
                         }
                     />
 
-                    <div className="w-px h-8 bg-slate-700 mx-2"></div>
+                    <div className="hidden xs:block w-px h-8 bg-slate-700 mx-1 sm:mx-2"></div>
 
                     <button
                         onClick={() => {
@@ -569,9 +622,9 @@ const StudentMonitor = () => {
                                 navigate('/student-dashboard');
                             }
                         }}
-                        className="bg-red-600 hover:bg-red-500 text-white px-8 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-red-600/20 transition-all border border-red-400/20"
+                        className="bg-slate-700/50 hover:bg-slate-700 text-white px-4 sm:px-8 py-2 sm:py-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest sm:tracking-[0.2em] transition-all border border-white/10"
                     >
-                        End Class
+                        Leave Class
                     </button>
                 </div>
             </footer>
@@ -602,7 +655,12 @@ const TeacherVideo = React.memo(({ stream }) => {
         if (videoRef.current && stream) videoRef.current.srcObject = stream;
     }, [stream]);
     return stream ? (
-        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-contain bg-slate-950" />
+        <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className="w-full h-full object-cover rounded-xl bg-slate-950"
+        />
     ) : null;
 });
 
@@ -612,17 +670,22 @@ const PipTeacherVideo = React.memo(({ stream }) => {
         if (videoRef.current && stream) videoRef.current.srcObject = stream;
     }, [stream]);
     return stream ? (
-        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover bg-slate-950" />
+        <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className="w-full h-full object-cover bg-slate-950"
+        />
     ) : null;
 });
 
 const ControlButton = ({ onClick, active, icon, label }) => (
     <button
         onClick={onClick}
-        className={`flex flex-col items-center gap-1.5 p-2.5 min-w-[72px] rounded-2xl transition-all ${active ? 'text-slate-300 hover:bg-slate-700/50 hover:text-white' : 'bg-red-500/10 text-red-500 hover:bg-red-500/20'}`}
+        className={`flex flex-col items-center gap-1 sm:gap-1.5 p-2 sm:p-2.5 min-w-[60px] sm:min-w-[72px] rounded-2xl transition-all ${active ? 'text-slate-300 hover:bg-slate-700/50 hover:text-white' : 'bg-red-500/10 text-red-500 hover:bg-red-500/20'}`}
     >
         {icon}
-        <span className="text-[9px] font-black uppercase tracking-tighter leading-none">{label}</span>
+        <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-tighter leading-none">{label}</span>
     </button>
 );
 

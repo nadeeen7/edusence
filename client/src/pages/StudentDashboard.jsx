@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Card from "../components/Card";
 import Notification from "../components/Notification";
 import api from "../services/api";
@@ -12,6 +12,15 @@ const StudentDashboard = () => {
     const [personalAttention, setPersonalAttention] = useState("---");
     const [loadingJoin, setLoadingJoin] = useState(false);
     const navigate = useNavigate();
+    const location = useLocation();
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const roomFromUrl = params.get("room");
+        if (roomFromUrl) {
+            setJoinRoomId(roomFromUrl.toUpperCase());
+        }
+    }, [location]);
 
     useEffect(() => {
         if (!user?.id) return;
@@ -93,16 +102,22 @@ const StudentDashboard = () => {
 
                 <Card className="border-purple-500/10 bg-[#1e293b]/50">
                     <form onSubmit={handleJoinClass} className="space-y-5">
-                        <div>
+                        <div className="relative">
                             <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Room ID</label>
                             <input
                                 type="text"
                                 required
-                                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-5 py-4 text-white text-lg focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-mono uppercase tracking-wider placeholder:text-slate-600"
+                                className={`w-full bg-slate-900/50 border rounded-xl px-5 py-4 text-white text-lg focus:outline-none transition-all font-mono uppercase tracking-wider placeholder:text-slate-600 ${joinRoomId ? 'border-purple-500 ring-1 ring-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.2)]' : 'border-slate-700/50 focus:border-purple-500 focus:ring-1 focus:ring-purple-500'}`}
                                 placeholder="e.g. CLASS-1234"
                                 value={joinRoomId}
                                 onChange={(e) => setJoinRoomId(e.target.value.toUpperCase())}
                             />
+                            {new URLSearchParams(location.search).get("room") && (
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5 bg-purple-500/20 px-2 py-1 rounded text-[10px] font-black text-purple-400 uppercase tracking-widest border border-purple-500/20">
+                                    <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-pulse"></div>
+                                    From Link
+                                </div>
+                            )}
                         </div>
                         <button
                             type="submit"
@@ -129,7 +144,7 @@ const StudentDashboard = () => {
                     </p>
                 </Card>
             </div>
-        </div>
+        </div >
     );
 };
 

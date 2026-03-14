@@ -1,8 +1,9 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../services/AuthContext";
 
 const ProtectedRoute = ({ children, role }) => {
     const { user, loading } = useAuth();
+    const location = useLocation();
 
     if (loading) {
         return (
@@ -13,7 +14,8 @@ const ProtectedRoute = ({ children, role }) => {
     }
 
     if (!user) {
-        return <Navigate to={role === "teacher" ? "/teacher-login" : "/student-login"} replace />;
+        const redirectPath = role === "teacher" ? "/teacher-login" : "/student-login";
+        return <Navigate to={`${redirectPath}${location.search}`} replace />;
     }
 
     if (role && user.role !== role) {
