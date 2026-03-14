@@ -1,1 +1,1 @@
-web: python server/app.py
+web: gunicorn --worker-class eventlet -w 1 --bin 0.0.0.0:$PORT server.app:app

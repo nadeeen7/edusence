@@ -330,6 +330,7 @@ After ending the class, the **Teacher Dashboard** provides:
 - [ ] **Advanced Student Analytics** — Show students their own trends over time
 - [ ] **PostgreSQL Production** — Full migration to PostgreSQL for concurrent access
 - [ ] **Deployment Pipeline** — automated CI/CD for cloud hosting
+- [x] **Deployment Guide** — [Detailed instructions](file:///c:/Users/Nadeen/Documents/ai_class/docs/deployment_guide.md) for production hosting
 
 ---
 
