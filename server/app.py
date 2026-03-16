@@ -1,5 +1,11 @@
 import eventlet
 eventlet.monkey_patch()
+try:
+    from psycogreen.eventlet import patch_psycopg
+    patch_psycopg()
+    print("[INFO] Psycopg2 monkey patched with psycogreen/eventlet", flush=True)
+except ImportError:
+    print("[WARNING] psycogreen not found, PostgreSQL queries might be blocking", flush=True)
 import os
 import sys
 
@@ -369,39 +375,31 @@ def generate_meeting_link(current_user):
 @token_required
 def start_session(current_user):
     try:
-        # Debug logging to identify why 403 is happening
-        print(f"[DEBUG] start_session: current_user={current_user}, type={type(current_user)}", flush=True)
+        # Simplified and robust role check
+        # We trust the token_required decorator which already validated the user
+        # We just need to make sure this is a student session
+        student_id = getattr(current_user, 'id', None)
+        is_student = str(student_id).startswith('STU') if student_id else False
         
-        # Robust role check: try isinstance, then check if it's a Student instance by ID prefix
-        is_student = isinstance(current_user, Student)
-        if not is_student and hasattr(current_user, 'id'):
-            # Fallback check for ID prefix often used for students
-            is_student = str(current_user.id).startswith('STU')
-            print(f"[DEBUG] start_session: fallback check is_student={is_student} (ID: {current_user.id})", flush=True)
-            
         if not is_student:
-            msg = f"Access denied: Only students can join sessions. Your Role: {type(current_user).__name__}, ID: {getattr(current_user, 'id', 'Unknown')}"
-            print(f"[ERROR] start_session: {msg}", flush=True)
+            msg = f"Join denied: Only student accounts can join. (ID: {student_id})"
             return jsonify({'success': False, 'message': msg}), 403
             
         data = request.json
-        student_id = current_user.id
         room = data.get('room')
-        
-        print(f"[INFO] start_session: Student {student_id} joining room {room}", flush=True)
         
         if not room:
             return jsonify({'success': False, 'message': 'Room code required'}), 400
             
+        print(f"[INFO] start_session: Student {student_id} joining room {room}", flush=True)
+        
         # Check if session already exists
         session_rec = MonitoringSession.query.filter_by(student_id=student_id, room_code=room, end_time=None).first()
         if not session_rec:
             session_rec = MonitoringSession(student_id=student_id, room_code=room)
             db.session.add(session_rec)
             db.session.commit()
-            print(f"[INFO] start_session: New MonitoringSession created ID={session_rec.id}", flush=True)
-        else:
-            print(f"[INFO] start_session: Re-using existing session ID={session_rec.id}", flush=True)
+            print(f"[INFO] start_session: Created session ID={session_rec.id}", flush=True)
             
         return jsonify({'success': True, 'session_id': session_rec.id}), 200
     except Exception as e:
