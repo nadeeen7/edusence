@@ -1,4 +1,9 @@
 import os
+import sys
+
+# Ensure local modules (config, models, auth) are importable when running from root
+sys.path.insert(0, os.path.dirname(__file__))
+
 import re
 import secrets
 import traceback
