@@ -36,6 +36,37 @@ if not os.getenv("DATABASE_URL"):
     basedir = os.path.abspath(os.path.dirname(__file__))
     load_dotenv(os.path.join(basedir, '.env'))
 
+# Fix for Render DATABASE_URL (postgres:// -> postgresql://)
+db_url = app.config.get('SQLALCHEMY_DATABASE_URI')
+if db_url and db_url.startswith("postgres://"):
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url.replace("postgres://", "postgresql://", 1)
+
+# Initialize Extensions
+app.config['COMPRESS_REGISTER'] = True
+Compress(app)
+
+# Explicit origins list for CORS (cannot use "*" with supports_credentials=True)
+origins = [
+    app.config.get('FRONTEND_URL', 'https://edusence.vercel.app'),
+    'http://localhost:5173',
+    'https://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://127.0.0.1:5173',
+    'http://localhost:3000',
+    re.compile(r"https://.*\.vercel\.app"),
+    re.compile(r"https://.*\.railway\.app")
+]
+
+CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
+db.init_app(app)
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*", # Allow all for SocketIO handshake
+    ping_timeout=60,
+    ping_interval=25,
+    async_mode='eventlet'
+)
+
 # Auto-create tables and indexes
 with app.app_context():
     db.create_all()
