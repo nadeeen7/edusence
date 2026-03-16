@@ -32,14 +32,21 @@ const StudentDashboard = () => {
             if (isFetching) return;
             isFetching = true;
             try {
-                const res = await api.get(`/api/get_student_stats/${user.id}`);
+                // Use a short timeout for background stats so they don't block the UI
+                const res = await api.get(`/api/get_student_stats/${user.id}`, { timeout: 5000 });
                 if (res.data && res.data.success && res.data.logs?.length > 0) {
                     setPersonalAttention(Math.round(res.data.logs[0].attention_score));
                 } else {
                     setPersonalAttention("---");
                 }
             } catch (error) {
-                console.error("Failed to fetch student stats:", error);
+                // Silently handle background stats errors to keep dashboard clean
+                if (error.code === 'ECONNABORTED') {
+                    console.warn("Student stats fetch timed out - ignoring.");
+                } else {
+                    console.error("Failed to fetch student stats:", error);
+                }
+                setPersonalAttention("---");
             } finally {
                 isFetching = false;
             }

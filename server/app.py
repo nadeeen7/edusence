@@ -410,7 +410,7 @@ def end_session_rest(current_user):
 @token_required
 def get_student_stats(current_user, student_id):
     try:
-        logs = AttentionLog.query.filter_by(student_id=student_id).order_by(AttentionLog.timestamp.desc()).limit(10).all()
+        logs = AttentionLog.query.filter_by(student_id=student_id).order_by(AttentionLog.timestamp.desc()).limit(20).all()
         return jsonify({
             'success': True,
             'logs': [{'attention_score': l.attention_score, 'timestamp': l.timestamp.isoformat()} for l in logs]
