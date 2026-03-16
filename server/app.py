@@ -47,13 +47,24 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 # Initialize Extensions
 app.config['COMPRESS_REGISTER'] = True
 Compress(app)
-origins = ["*"] # Simplifed for robust production connectivity while debugging stability
+
+# Explicit origins list for CORS (cannot use "*" with supports_credentials=True)
+origins = [
+    app.config.get('FRONTEND_URL', 'https://edusence.vercel.app'),
+    'http://localhost:5173',
+    'https://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://127.0.0.1:5173',
+    'http://localhost:3000',
+    re.compile(r"https://.*\.vercel\.app"),
+    re.compile(r"https://.*\.railway\.app")
+]
 
 CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
 db.init_app(app)
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=origins, # Match browser CORS origins
     ping_timeout=60,
     ping_interval=25,
     async_mode='eventlet'
@@ -62,26 +73,23 @@ socketio = SocketIO(
 # Auto-create tables and indexes if they don't exist
 with app.app_context():
     db.create_all()
-    try:
-        # Manually ensure indexes exist for existing databases (CRITICAL for performance)
-        from sqlalchemy import text
-        indexes = [
-            "CREATE INDEX IF NOT EXISTS idx_attention_student ON attention_logs(student_id)",
-            "CREATE INDEX IF NOT EXISTS idx_attention_session ON attention_logs(session_id)",
-            "CREATE INDEX IF NOT EXISTS idx_attention_time ON attention_logs(timestamp)",
-            "CREATE INDEX IF NOT EXISTS idx_alerts_student ON alerts(student_id)",
-            "CREATE INDEX IF NOT EXISTS idx_alerts_time ON alerts(timestamp)",
-            "CREATE INDEX IF NOT EXISTS idx_sessions_student ON monitoring_sessions(student_id)",
-            "CREATE INDEX IF NOT EXISTS idx_sessions_room ON monitoring_sessions(room_code)",
-            "CREATE INDEX IF NOT EXISTS idx_meetings_teacher ON meeting_links(teacher_id)",
-            "CREATE INDEX IF NOT EXISTS idx_meetings_active ON meeting_links(is_active)"
-        ]
-        for sql in indexes:
-            db.session.execute(text(sql))
-        db.session.commit()
-    except Exception as e:
-        print(f"[WARNING] Manual indexing failed (might exist): {str(e)}", flush=True)
-        db.session.rollback()
+    # Manual indexing is risky on every startup if the DB is remote/slow
+    # Only run it once or if explicitly triggered in a real production env
+    if os.environ.get('RUN_MIGRATIONS_ON_START', 'true').lower() == 'true':
+        try:
+            from sqlalchemy import text
+            # Ensure we don't block startup too long
+            indexes = [
+                "CREATE INDEX IF NOT EXISTS idx_attention_student ON attention_logs(student_id)",
+                "CREATE INDEX IF NOT EXISTS idx_attention_session ON attention_logs(session_id)",
+                "CREATE INDEX IF NOT EXISTS idx_sessions_room ON monitoring_sessions(room_code)"
+            ]
+            for sql in indexes:
+                db.session.execute(text(sql))
+            db.session.commit()
+        except Exception as e:
+            print(f"[WARNING] Manual indexing skipped/failed: {str(e)}", flush=True)
+            db.session.rollback()
 
 # --- Internal State ---
 classroom_sessions = {} # { room_code: { students: { id: { name, attention, ... } }, active: bool } }
