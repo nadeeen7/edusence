@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, session, redirect, url_for, render_template, Response
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_compress import Compress
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
@@ -34,6 +35,8 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 }
 
 # Initialize Extensions
+app.config['COMPRESS_REGISTER'] = True
+Compress(app)
 origins = [
     app.config.get('FRONTEND_URL', 'https://edusence.vercel.app'),
     'http://localhost:5173',
@@ -52,7 +55,13 @@ origins = [
 
 CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
 db.init_app(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    ping_timeout=60,
+    ping_interval=25,
+    async_mode='threading'
+)
 
 # Auto-create tables if they don't exist (works with both gunicorn and python app.py)
 with app.app_context():
@@ -74,7 +83,11 @@ def verify_password(hashed_password, password):
 
 @app.route('/')
 def index():
-    return jsonify({"status": "Online Attention Detector API is running"}), 200
+    return jsonify({"status": "EduSense API is running"}), 200
+
+@app.route('/health')
+def health():
+    return jsonify({"status": "running", "service": "EduSense API"}), 200
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -693,7 +706,8 @@ def log_attention_to_db(student_id, score, room, status=None):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    socketio.run(app, debug=False, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, debug=False, host='0.0.0.0', port=port)
 
 @app.route('/api/log_error', methods=['POST'])
 def log_error():
