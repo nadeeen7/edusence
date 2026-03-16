@@ -398,7 +398,10 @@ const StudentMonitor = () => {
                 }
             } catch (err) {
                 console.error("Monitor Init Error:", err);
-                setStatusMessage("Join Error");
+                // Only show error if validation failed, not if it's just a transient connection issue
+                if (err.response?.status === 404 || err.response?.status === 400) {
+                    setStatusMessage("Join Error");
+                }
             }
         };
 
