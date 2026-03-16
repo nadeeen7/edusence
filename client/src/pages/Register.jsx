@@ -7,13 +7,17 @@ import api from "../services/api";
 const Register = () => {
     const [formData, setFormData] = useState({ name: "", email: "", password: "", role: "teacher" });
     const [loading, setLoading] = useState(false);
+    const [isLongLoading, setIsLongLoading] = useState(false);
     const [notification, setNotification] = useState(null);
     const navigate = useNavigate();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setLoading(true);
-        setNotification(null);
+        setIsLongLoading(false);
+        const timer = setTimeout(() => {
+            if (loading) setIsLongLoading(true);
+        }, 10000);
+
         try {
             console.log("Submitting registration:", formData);
             const res = await api.post("/register", formData);
@@ -31,7 +35,9 @@ const Register = () => {
             const msg = err.response?.data?.message || err.message || "Registration failed. Please check if server is running.";
             setNotification({ type: "error", message: msg });
         } finally {
+            clearTimeout(timer);
             setLoading(false);
+            setIsLongLoading(false);
         }
     };
 
@@ -95,9 +101,12 @@ const Register = () => {
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                        className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(37,99,235,0.3)] flex items-center justify-center gap-2"
                     >
-                        {loading ? "Creating Account..." : "Sign Up"}
+                        {loading && (
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        )}
+                        {loading ? (isLongLoading ? "Server is starting, please wait..." : "Creating Account...") : "Sign Up"}
                     </button>
                 </form>
 

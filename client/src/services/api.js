@@ -4,7 +4,7 @@ import { API_BASE_URL } from '../config/api';
 const api = axios.create({
     baseURL: API_BASE_URL,
     withCredentials: true,
-    timeout: 30000,
+    timeout: 60000,
     headers: {
         'Content-Type': 'application/json'
     }
@@ -37,7 +37,9 @@ api.interceptors.response.use(
             url: error.config?.url
         });
 
-        if (!error.response) {
+        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+            alert("The server is taking a while to wake up. Please wait or try again in a few seconds.");
+        } else if (!error.response) {
             alert(`Network Error: ${message}. Check if both backend and frontend servers are running.`);
         }
         return Promise.reject(error);

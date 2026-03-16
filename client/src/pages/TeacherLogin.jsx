@@ -9,13 +9,17 @@ const TeacherLogin = () => {
     const { login } = useAuth();
     const [formData, setFormData] = useState({ email: "", password: "" });
     const [loading, setLoading] = useState(false);
+    const [isLongLoading, setIsLongLoading] = useState(false);
     const [notification, setNotification] = useState(null);
     const navigate = useNavigate();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setLoading(true);
-        setNotification(null);
+        setIsLongLoading(false);
+        const timer = setTimeout(() => {
+            if (loading) setIsLongLoading(true);
+        }, 10000);
+
         try {
             const res = await api.post("/login", { ...formData, role: 'teacher' });
             if (res.data.success) {
@@ -26,7 +30,9 @@ const TeacherLogin = () => {
         } catch (err) {
             setNotification({ type: "error", message: err.response?.data?.message || "Login failed" });
         } finally {
+            clearTimeout(timer);
             setLoading(false);
+            setIsLongLoading(false);
         }
     };
 
@@ -70,9 +76,12 @@ const TeacherLogin = () => {
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                        className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(37,99,235,0.3)] flex items-center justify-center gap-2"
                     >
-                        {loading ? "Authenticating..." : "Sign In"}
+                        {loading && (
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        )}
+                        {loading ? (isLongLoading ? "Server is starting, please wait..." : "Authenticating...") : "Sign In"}
                     </button>
                 </form>
 
