@@ -27,7 +27,10 @@ const StudentDashboard = () => {
     useEffect(() => {
         if (!user?.id) return;
 
+        let isFetching = false;
         const fetchStats = async () => {
+            if (isFetching) return;
+            isFetching = true;
             try {
                 const res = await api.get(`/api/get_student_stats/${user.id}`);
                 if (res.data && res.data.success && res.data.logs?.length > 0) {
@@ -37,11 +40,13 @@ const StudentDashboard = () => {
                 }
             } catch (error) {
                 console.error("Failed to fetch student stats:", error);
+            } finally {
+                isFetching = false;
             }
         };
 
         fetchStats();
-        const interval = setInterval(fetchStats, 5000);
+        const interval = setInterval(fetchStats, 10000);
         return () => clearInterval(interval);
     }, [user?.id]);
 

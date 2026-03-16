@@ -46,7 +46,10 @@ const TeacherDashboard = () => {
         }
     }, [teacherInfo]);
 
+    let isFetching = false;
     const fetchDashboardData = async () => {
+        if (isFetching) return;
+        isFetching = true;
         try {
             const roomToFetch = localStorage.getItem("active_class_code");
             const url = roomToFetch ? `/api/dashboard/stats?room=${roomToFetch}` : "/api/dashboard/stats";
@@ -76,6 +79,7 @@ const TeacherDashboard = () => {
             setNotification({ type: "error", message: msg });
         } finally {
             setLoading(false);
+            isFetching = false;
         }
     };
 

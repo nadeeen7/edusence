@@ -38,7 +38,7 @@ api.interceptors.response.use(
         });
 
         if (!error.response) {
-            alert(`Network Error: ${message}. Check if both backend and frontend servers are running.`);
+            console.warn(`Network Error: ${message}. This is likely a transient connection issue.`);
         }
         return Promise.reject(error);
     }
