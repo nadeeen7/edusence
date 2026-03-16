@@ -22,42 +22,42 @@ class Student(db.Model):
 class MonitoringSession(db.Model):
     __tablename__ = 'monitoring_sessions'
     id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.String, db.ForeignKey('students.id'), nullable=False)
-    room_code = db.Column(db.String)
-    start_time = db.Column(db.DateTime, default=db.func.current_timestamp())
-    end_time = db.Column(db.DateTime)
+    student_id = db.Column(db.String, db.ForeignKey('students.id'), nullable=False, index=True)
+    room_code = db.Column(db.String, index=True)
+    start_time = db.Column(db.DateTime, default=db.func.current_timestamp(), index=True)
+    end_time = db.Column(db.DateTime, index=True)
     avg_attention = db.Column(db.Float)
     alerts_count = db.Column(db.Integer, default=0)
 
 class AttentionLog(db.Model):
     __tablename__ = 'attention_logs'
     id = db.Column(db.Integer, primary_key=True)
-    session_id = db.Column(db.Integer, db.ForeignKey('monitoring_sessions.id'), nullable=False)
-    student_id = db.Column(db.String, db.ForeignKey('students.id'), nullable=False)
+    session_id = db.Column(db.Integer, db.ForeignKey('monitoring_sessions.id'), nullable=False, index=True)
+    student_id = db.Column(db.String, db.ForeignKey('students.id'), nullable=False, index=True)
     attention_score = db.Column(db.Float, nullable=False)
     ear_value = db.Column(db.Float)
     mar_value = db.Column(db.Float)
     head_yaw = db.Column(db.String)
     head_pitch = db.Column(db.String)
-    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp(), index=True)
 
 class Alert(db.Model):
     __tablename__ = 'alerts'
     id = db.Column(db.Integer, primary_key=True)
-    session_id = db.Column(db.Integer, db.ForeignKey('monitoring_sessions.id'), nullable=False)
-    student_id = db.Column(db.String, db.ForeignKey('students.id'), nullable=False)
+    session_id = db.Column(db.Integer, db.ForeignKey('monitoring_sessions.id'), nullable=False, index=True)
+    student_id = db.Column(db.String, db.ForeignKey('students.id'), nullable=False, index=True)
     alert_type = db.Column(db.String, nullable=False)
     alert_message = db.Column(db.String, nullable=False)
-    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp(), index=True)
 
 class MeetingLink(db.Model):
     __tablename__ = 'meeting_links'
     id = db.Column(db.Integer, primary_key=True)
     link_code = db.Column(db.String, unique=True, nullable=False)
-    teacher_id = db.Column(db.Integer, db.ForeignKey('teachers.id'), nullable=False)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('teachers.id'), nullable=False, index=True)
     class_name = db.Column(db.String)
-    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
-    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), index=True)
+    is_active = db.Column(db.Boolean, default=True, index=True)
 
 class SessionAnalytics(db.Model):
     __tablename__ = 'session_analytics'
