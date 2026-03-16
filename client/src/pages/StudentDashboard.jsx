@@ -10,7 +10,6 @@ const StudentDashboard = () => {
     const { user, logout } = useAuth();
     const [joinRoomId, setJoinRoomId] = useState("");
     const [notification, setNotification] = useState(null);
-    const [personalAttention, setPersonalAttention] = useState("---");
     const [loadingJoin, setLoadingJoin] = useState(false);
     const [showScanner, setShowScanner] = useState(false);
     const navigate = useNavigate();
