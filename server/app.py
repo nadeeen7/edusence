@@ -36,6 +36,10 @@ CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-D
 db.init_app(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# Auto-create tables if they don't exist (works with both gunicorn and python app.py)
+with app.app_context():
+    db.create_all()
+
 # --- Internal State ---
 classroom_sessions = {} # { room_code: { students: { id: { name, attention, ... } }, active: bool } }
 connected_students = {} # { sid: { student_id, name, room } }
