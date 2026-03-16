@@ -23,12 +23,21 @@ export const useMediaStream = () => {
         startingRef.current = true;
         try {
             console.log("Requesting Media Stream...");
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
+            
+            const videoConstraints = isMobile ? {
+                width: { ideal: 640 },
+                height: { ideal: 480 },
+                frameRate: { ideal: 20 },
+                facingMode: 'user'
+            } : {
+                width: { min: 640, ideal: 1280 },
+                height: { min: 480, ideal: 720 },
+                facingMode: 'user'
+            };
+
             const mediaStream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    width: { min: 640, ideal: 1280 },
-                    height: { min: 480, ideal: 720 },
-                    facingMode: 'user'
-                },
+                video: videoConstraints,
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,

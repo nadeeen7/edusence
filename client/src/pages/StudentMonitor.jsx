@@ -99,6 +99,8 @@ const StudentMonitor = () => {
     const studentStreamRef = useRef(null);
     const tracksAddedRef = useRef(false);
     const mainAreaRef = useRef(null);
+    const eyesClosedStartRef = useRef(null);
+    const lookingDownStartRef = useRef(null);
 
 
     // Draggable PIP - Update initial position for mobile
@@ -160,24 +162,99 @@ const StudentMonitor = () => {
 
         if (hasFace) {
             const landmarks = results.multiFaceLandmarks[0];
+            const now = Date.now();
             score = 100;
             status = "Focused";
 
+            // 1. EAR (Eye Aspect Ratio) 
+            const earL = Math.abs(landmarks[159].y - landmarks[145].y) / Math.max(0.01, Math.abs(landmarks[33].x - landmarks[133].x));
+            const earR = Math.abs(landmarks[386].y - landmarks[374].y) / Math.max(0.01, Math.abs(landmarks[362].x - landmarks[263].x));
+            const avgEAR = (earL + earR) / 2;
+
+            if (avgEAR < 0.15) {
+                if (!eyesClosedStartRef.current) eyesClosedStartRef.current = now;
+                const duration = now - eyesClosedStartRef.current;
+                if (duration > 1500) { score -= 80; status = "Sleepy"; }
+                else if (duration > 300) { score -= 40; status = "Distracted (Eyes)"; }
+            } else {
+                eyesClosedStartRef.current = null;
+            }
+
+            // 2. Head Pose (Yaw & Pitch)
             const nose = landmarks[4];
             const eyeL = landmarks[33];
             const eyeR = landmarks[263];
             const dist = Math.abs(eyeR.x - eyeL.x);
-            const pitch = (nose.y - (eyeL.y + eyeR.y) / 2) / dist - 0.4;
+            const midEyes = { x: (eyeL.x + eyeR.x) / 2, y: (eyeL.y + eyeR.y) / 2 };
+            
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
+            
+            // Yaw (Sideways)
+            const yaw = (nose.x - midEyes.x) / dist;
+            const yawThreshold = isMobile ? 0.20 : 0.18;
+            if (Math.abs(yaw) > yawThreshold) {
+                score -= Math.abs(yaw) > 0.4 ? 60 : 40;
+                status = yaw > 0 ? "Looking Right" : "Looking Left";
+            }
 
-            if (pitch > 0.15) { score = 30; status = "Looking Down"; }
-            else if (pitch < -0.15) { score = 50; status = "Looking Up"; }
+            // Pitch (Vertical)
+            const pitchThreshold = isMobile ? 0.25 : 0.15;
+            const pitchBaseline = isMobile ? 0.32 : 0.4;
+            const pitch = (nose.y - midEyes.y) / dist - pitchBaseline;
+
+            if (pitch > pitchThreshold) {
+                if (!lookingDownStartRef.current) lookingDownStartRef.current = now;
+                const downDuration = now - lookingDownStartRef.current;
+                if (downDuration > 2500) { score -= 70; status = "Looking Down (Long)"; }
+                else { score -= 30; status = "Looking Down"; }
+            } else if (pitch < -pitchThreshold) {
+                lookingDownStartRef.current = null;
+                score -= 45;
+                status = "Looking Up";
+            } else {
+                lookingDownStartRef.current = null;
+            }
+            
+            // 3. Eye Gaze (Iris Tracking)
+            // Left iris: 468, Right iris: 473
+            // Left eye corners: 33 (inner), 133 (outer)
+            // Right eye corners: 362 (inner), 263 (outer)
+            if (landmarks.length > 473 && landmarks[468] && landmarks[473]) {
+                const irisL = landmarks[468];
+                const irisR = landmarks[473];
+                const eyeLInner = landmarks[33];
+                const eyeLOuter = landmarks[133];
+                const eyeRInner = landmarks[362];
+                const eyeROuter = landmarks[263];
+
+                const eyeWidthL = Math.abs(eyeLOuter.x - eyeLInner.x);
+                const eyeWidthR = Math.abs(eyeROuter.x - eyeRInner.x);
+
+                if (eyeWidthL > 0.005 && eyeWidthR > 0.005) {
+                    const gazeRatioL = (irisL.x - eyeLInner.x) / eyeWidthL;
+                    const gazeRatioR = (irisR.x - eyeRInner.x) / eyeWidthR;
+                    const avgGaze = (gazeRatioL + gazeRatioR) / 2;
+
+                    // Center is ~0.5; further from 0.5 = looking away
+                    const gazeDeviation = Math.abs(avgGaze - 0.5);
+                    const gazeThreshold = isMobile ? 0.18 : 0.12;
+
+                    if (!isNaN(gazeDeviation) && gazeDeviation > gazeThreshold) {
+                        score -= 45;
+                        if (status === "Focused") status = "Looking Away (Eyes)";
+                    }
+                }
+            }
+            
+            score = Math.max(0, score);
         }
 
         if (!videoEnabledRef.current) {
             score = 0; // Attention is 0 when camera is off
             status = "Camera Off";
-        } else if (score === 0) {
+        } else if (score === 0 && status === "Focused") {
             console.warn("Attention score is 0 - Face not detected or MediaPipe failing");
+            status = "Not Detected";
         }
 
         attentionHistoryRef.current.push(score);
@@ -527,7 +604,7 @@ const StudentMonitor = () => {
                     style={pipStyle}
                     onMouseDown={pipMouseDown}
                     onTouchStart={pipTouchStart}
-                    className={`w-28 sm:w-48 lg:w-64 aspect-video bg-slate-900 rounded-xl overflow-hidden shadow-2xl border border-white/10 ring-2 ring-black/50 transition-shadow duration-300 select-none ${isDragging ? 'shadow-blue-500/30 ring-blue-500/50 cursor-grabbing scale-105' : 'cursor-grab hover:shadow-xl hover:ring-white/20'}`}
+                    className={`w-36 sm:w-60 lg:w-80 aspect-video bg-slate-900 rounded-xl overflow-hidden shadow-2xl border border-white/10 ring-2 ring-black/50 transition-shadow duration-300 select-none ${isDragging ? 'shadow-blue-500/30 ring-blue-500/50 cursor-grabbing scale-105' : 'cursor-grab hover:shadow-xl hover:ring-white/20'}`}
                 >
                     <div className="w-full h-full relative">
                         {swapped ? (
