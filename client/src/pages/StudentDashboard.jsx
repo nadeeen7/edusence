@@ -24,42 +24,8 @@ const StudentDashboard = () => {
         }
     }, [location]);
 
-    useEffect(() => {
-        if (!user?.id) return;
-        
-        // Track consecutive failures to stop hammering the server if it's struggling
-        let consecutiveFailures = 0;
-        let isFetching = false;
-        
-        const fetchStats = async () => {
-            if (isFetching || consecutiveFailures >= 3) return;
-            isFetching = true;
-            try {
-                // Increased to 15s - background sync needs more patience for cold starts
-                const res = await api.get(`/api/get_student_stats/${user.id}`, { timeout: 15000 });
-                if (res.data && res.data.success && res.data.logs?.length > 0) {
-                    setPersonalAttention(Math.round(res.data.logs[0].attention_score));
-                    consecutiveFailures = 0; // Reset on success
-                } else {
-                    setPersonalAttention("---");
-                }
-            } catch (error) {
-                if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-                    consecutiveFailures++;
-                    console.warn(`Stats fetch timeout (${consecutiveFailures}/3). Polling will pause if this continues.`);
-                } else {
-                    console.error("Failed to fetch student stats:", error);
-                }
-                setPersonalAttention("---");
-            } finally {
-                isFetching = false;
-            }
-        };
-
-        const interval = setInterval(fetchStats, 60000); // Poll every 60s
-        fetchStats(); // Initial fetch
-        return () => clearInterval(interval);
-    }, [user?.id]);
+    // NOTE: get_student_stats auto-polling removed. It was causing timeouts that blocked
+    // the UI and validate_room requests. Stats are not shown on the join screen.
 
     const handleLogout = () => {
         logout();
