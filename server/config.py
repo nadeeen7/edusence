@@ -9,7 +9,11 @@ if not os.getenv("DATABASE_URL"):
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "classroom_live_stable_secret_key_for_persistence")
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')
+    raw_db_url = os.getenv('DATABASE_URL')
+    if raw_db_url and raw_db_url.startswith("postgres://"):
+        SQLALCHEMY_DATABASE_URI = raw_db_url.replace("postgres://", "postgresql://", 1)
+    else:
+        SQLALCHEMY_DATABASE_URI = raw_db_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "edusense_jwt_secure_secret_7788")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=7)
