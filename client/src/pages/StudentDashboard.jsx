@@ -109,7 +109,7 @@ const StudentDashboard = () => {
         setNotification({ type: "success", message: `Scanned: ${code} — Joining...` });
         (async () => {
             try {
-                const validateRes = await api.get(`/api/validate_room?code=${code}`, { timeout: 20000 });
+                const validateRes = await api.get(`/api/validate_room?code=${code}`, { timeout: 45000 });
                 if (!validateRes.data || !validateRes.data.valid) {
                     setNotification({ type: "error", message: validateRes.data.message || "Invalid Room ID from QR." });
                     setLoadingJoin(false);
