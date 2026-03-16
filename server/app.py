@@ -53,10 +53,6 @@ origins = [
     'https://127.0.0.1:5173',
     'http://192.168.1.5:5173',
     'https://192.168.1.5:5173',
-    'https://edusence.vercel.app',
-    'https://edusence-fp9xgs1ab-nadeeen7s-projects.vercel.app',
-    'https://edusence-6hmtk5l6y-nadeeen7s-projects.vercel.app',
-    'https://web-production-0b50e.up.railway.app',
     re.compile(r"https://.*\.vercel\.app"),
     re.compile(r"https://.*\.railway\.app")
 ]
