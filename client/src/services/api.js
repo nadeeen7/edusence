@@ -4,7 +4,7 @@ import { API_BASE_URL } from '../config/api';
 const api = axios.create({
     baseURL: API_BASE_URL,
     withCredentials: true,
-    timeout: 30000,
+    timeout: 10000, // Reduced default timeout for general requests
     headers: {
         'Content-Type': 'application/json'
     }
@@ -34,11 +34,16 @@ api.interceptors.response.use(
             status: error.response?.status,
             data: error.response?.data,
             message: error.message,
+            code: error.code,
             url: error.config?.url
         });
 
         if (!error.response) {
-            console.warn(`Network Error: ${message}. This is likely a transient connection issue.`);
+            if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+                console.warn(`Timeout Error: The request took too long. Check server status.`);
+            } else {
+                console.warn(`Network Error: ${message}. This is likely a transient connection issue.`);
+            }
         }
         return Promise.reject(error);
     }

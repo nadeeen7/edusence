@@ -1,3 +1,5 @@
+import eventlet
+eventlet.monkey_patch()
 import os
 import sys
 
@@ -64,7 +66,7 @@ socketio = SocketIO(
     cors_allowed_origins="*",
     ping_timeout=60,
     ping_interval=25,
-    async_mode='threading'
+    async_mode='eventlet'
 )
 
 # Auto-create tables and indexes if they don't exist
