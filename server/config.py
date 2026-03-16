@@ -15,3 +15,14 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=7)
     FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
     CORS_ORIGINS = [FRONTEND_URL, "http://localhost:3000"]
+
+    # Database connection pool tuning for stability
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_recycle": 1800,
+        "pool_pre_ping": True,
+        "connect_args": {
+            "connect_timeout": 10
+        }
+    }

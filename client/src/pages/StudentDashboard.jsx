@@ -75,8 +75,8 @@ const StudentDashboard = () => {
         setLoadingJoin(true);
         setNotification(null);
         try {
-            // Explicit 20s timeout for room validation to prevent indefinite "Connecting..." while allowing for cold starts
-            const validateRes = await api.get(`/api/validate_room?code=${roomId}`, { timeout: 20000 });
+            // Explicit 45s timeout for room validation (very patient for cold starts)
+            const validateRes = await api.get(`/api/validate_room?code=${roomId}`, { timeout: 45000 });
             if (!validateRes.data || !validateRes.data.valid) {
                 setNotification({ type: "error", message: validateRes.data.message || "Invalid Room ID." });
                 setLoadingJoin(false);
