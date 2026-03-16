@@ -2,9 +2,10 @@ import os
 from datetime import timedelta
 from dotenv import load_dotenv
 
-# Robust .env loading
-basedir = os.path.abspath(os.path.dirname(__file__))
-load_dotenv(os.path.join(basedir, '.env'))
+# Robust .env loading - only load if not in production environment
+if not os.getenv("DATABASE_URL"):
+    basedir = os.path.abspath(os.path.dirname(__file__))
+    load_dotenv(os.path.join(basedir, '.env'))
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "classroom_live_stable_secret_key_for_persistence")

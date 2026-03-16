@@ -23,7 +23,7 @@ const StudentLogin = () => {
             if (res.data.success) {
                 setNotification({ type: "success", message: "Login successful!" });
                 login(res.data.user, res.data.token);
-                setTimeout(() => navigate(`/student-dashboard${location.search}`), 1000);
+                navigate(`/student-dashboard${location.search}`);
             }
         } catch (err) {
             const msg = err.response?.data?.message || "Login failed. Please check your credentials.";

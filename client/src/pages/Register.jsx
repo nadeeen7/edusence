@@ -21,9 +21,7 @@ const Register = () => {
             console.log("Registration Response:", res.data);
             if (res.data.success) {
                 setNotification({ type: "success", message: res.data.message || "Registration successful! Redirecting to login..." });
-                setTimeout(() => {
-                    navigate(formData.role === "teacher" ? "/teacher-login" : "/student-login");
-                }, 2000);
+                navigate(formData.role === "teacher" ? "/teacher-login" : "/student-login");
             } else {
                 setNotification({ type: "error", message: res.data.message || "Registration failed." });
             }

@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 import re
+import time
 import secrets
 import traceback
 import csv
@@ -101,7 +102,6 @@ def register():
     """Register student or teacher with hashed password"""
     try:
         data = request.json
-        print(f"Registration Attempt: {data}")
         name = data.get('name')
         email = data.get('email', '').strip().lower()
         password = data.get('password')
@@ -110,14 +110,17 @@ def register():
         if not all([name, email, password]):
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
 
-        if Teacher.query.filter_by(email=email).first() or Student.query.filter_by(email=email).first():
+        # Single combined check for email existence across both tables
+        teacher_exists = Teacher.query.filter_by(email=email).first()
+        student_exists = Student.query.filter_by(email=email).first()
+        if teacher_exists or student_exists:
             return jsonify({'success': False, 'message': 'Email already registered'}), 400
 
         if role == 'teacher':
             new_user = Teacher(name=name, email=email, password=hash_password(password))
         else:
-            student_count = Student.query.count()
-            student_id = f"STU{str(student_count + 1).zfill(3)}"
+            # Use a timestamp-based ID to avoid count() query
+            student_id = f"STU{str(int(time.time() * 1000))[-7:]}"
             new_user = Student(id=student_id, name=name, email=email, password=hash_password(password))
 
         db.session.add(new_user)
@@ -155,17 +158,7 @@ def login():
                     'role': role
                 }
             }), 200
-        
-        # New: Check if the email exists for the OTHER role to provide a helpful error
-        other_role = 'student' if role == 'teacher' else 'teacher'
-        other_user = Student.query.filter_by(email=email).first() if role == 'teacher' else Teacher.query.filter_by(email=email).first()
-        
-        if other_user:
-            return jsonify({
-                'success': False, 
-                'message': f'This email is registered as a {other_role}. Please use the {other_role} login portal.'
-            }), 401
-            
+
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500

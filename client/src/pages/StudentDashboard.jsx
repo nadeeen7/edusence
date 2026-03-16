@@ -77,7 +77,7 @@ const StudentDashboard = () => {
 
             if (sessionRes.data && sessionRes.data.success) {
                 setNotification({ type: "success", message: "Connecting to Session..." });
-                setTimeout(() => navigate(`/monitor?room=${roomId}&session=${sessionRes.data.session_id}`), 500);
+                navigate(`/monitor?room=${roomId}&session=${sessionRes.data.session_id}`);
             } else {
                 setNotification({ type: "error", message: sessionRes.data.message || "Failed to start monitoring session." });
             }

@@ -22,7 +22,7 @@ const TeacherLogin = () => {
             if (res.data.success) {
                 login(res.data.user, res.data.token);
                 setNotification({ type: "success", message: "Login successful!" });
-                setTimeout(() => navigate("/teacher-dashboard"), 1000);
+                navigate("/teacher-dashboard");
             }
         } catch (err) {
             setNotification({ type: "error", message: err.response?.data?.message || "Login failed" });
