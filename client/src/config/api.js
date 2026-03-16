@@ -1,1 +1,1 @@
-export const API_BASE_URL = "https://edusense-backend-aye1.onrender.com";
+export const API_BASE_URL = "https://web-production-0b50e.up.railway.app";

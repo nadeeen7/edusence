@@ -45,7 +45,9 @@ origins = [
     'https://edusence.vercel.app',
     'https://edusence-fp9xgs1ab-nadeeen7s-projects.vercel.app',
     'https://edusence-6hmtk5l6y-nadeeen7s-projects.vercel.app',
-    re.compile(r"https://.*\.vercel\.app")
+    'https://web-production-0b50e.up.railway.app',
+    re.compile(r"https://.*\.vercel\.app"),
+    re.compile(r"https://.*\.railway\.app")
 ]
 
 CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])

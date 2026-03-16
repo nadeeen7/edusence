@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
+import { API_BASE_URL } from '../config/api';
 
-const SOCKET_URL = import.meta.env.VITE_API_URL || "";
+const SOCKET_URL = API_BASE_URL;
 
 export const useSocketSession = (roomCode, user, role) => {
     const socketRef = useRef(null);
