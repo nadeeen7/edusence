@@ -57,8 +57,8 @@ const StudentDashboard = () => {
         };
 
         fetchStats();
-        // Increase interval to 30s to reduce server load
-        const interval = setInterval(fetchStats, 30000);
+        // Increase interval to 60s to further reduce server load
+        const interval = setInterval(fetchStats, 60000);
         return () => clearInterval(interval);
     }, [user?.id]);
 
