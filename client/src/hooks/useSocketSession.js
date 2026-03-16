@@ -30,7 +30,6 @@ export const useSocketSession = (roomCode, user, role) => {
         if (!socketRef.current) {
             console.log("Initializing Socket Connection...");
             socketRef.current = io(SOCKET_URL, {
-                transports: ["websocket"],
                 withCredentials: true,
                 autoConnect: true
             });

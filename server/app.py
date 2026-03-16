@@ -64,7 +64,7 @@ CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-D
 db.init_app(app)
 socketio = SocketIO(
     app,
-    cors_allowed_origins=origins, # Match browser CORS origins
+    cors_allowed_origins="*", # Allow all for SocketIO handshake (REST API remains protected by standard CORS above)
     ping_timeout=60,
     ping_interval=25,
     async_mode='eventlet'
