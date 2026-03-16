@@ -37,9 +37,7 @@ api.interceptors.response.use(
             url: error.config?.url
         });
 
-        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-            alert("The server is taking a while to wake up. Please wait or try again in a few seconds.");
-        } else if (!error.response) {
+        if (!error.response) {
             alert(`Network Error: ${message}. Check if both backend and frontend servers are running.`);
         }
         return Promise.reject(error);
