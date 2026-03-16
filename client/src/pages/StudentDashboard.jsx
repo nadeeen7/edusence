@@ -75,8 +75,8 @@ const StudentDashboard = () => {
         setLoadingJoin(true);
         setNotification(null);
         try {
-            // Explicit 10s timeout for room validation to prevent indefinite "Connecting..."
-            const validateRes = await api.get(`/api/validate_room?code=${roomId}`, { timeout: 10000 });
+            // Explicit 20s timeout for room validation to prevent indefinite "Connecting..." while allowing for cold starts
+            const validateRes = await api.get(`/api/validate_room?code=${roomId}`, { timeout: 20000 });
             if (!validateRes.data || !validateRes.data.valid) {
                 setNotification({ type: "error", message: validateRes.data.message || "Invalid Room ID." });
                 setLoadingJoin(false);
@@ -109,7 +109,7 @@ const StudentDashboard = () => {
         setNotification({ type: "success", message: `Scanned: ${code} — Joining...` });
         (async () => {
             try {
-                const validateRes = await api.get(`/api/validate_room?code=${code}`, { timeout: 10000 });
+                const validateRes = await api.get(`/api/validate_room?code=${code}`, { timeout: 20000 });
                 if (!validateRes.data || !validateRes.data.valid) {
                     setNotification({ type: "error", message: validateRes.data.message || "Invalid Room ID from QR." });
                     setLoadingJoin(false);

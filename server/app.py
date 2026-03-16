@@ -47,17 +47,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 # Initialize Extensions
 app.config['COMPRESS_REGISTER'] = True
 Compress(app)
-origins = [
-    app.config.get('FRONTEND_URL', 'https://edusence.vercel.app'),
-    'http://localhost:5173',
-    'https://localhost:5173',
-    'http://127.0.0.1:5173',
-    'https://127.0.0.1:5173',
-    'http://192.168.1.5:5173',
-    'https://192.168.1.5:5173',
-    re.compile(r"https://.*\.vercel\.app"),
-    re.compile(r"https://.*\.railway\.app")
-]
+origins = ["*"] # Simplifed for robust production connectivity while debugging stability
 
 CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
 db.init_app(app)
