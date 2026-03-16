@@ -31,54 +31,18 @@ load_dotenv()
 app = Flask(__name__)
 app.config.from_object(Config)
 
-# Fix for Render DATABASE_URL (postgres:// -> postgresql://)
-db_url = app.config.get('SQLALCHEMY_DATABASE_URI')
-if db_url and db_url.startswith("postgres://"):
-    app.config['SQLALCHEMY_DATABASE_URI'] = db_url.replace("postgres://", "postgresql://", 1)
+# Robust .env loading - only load if not in production environment
+if not os.getenv("DATABASE_URL"):
+    basedir = os.path.abspath(os.path.dirname(__file__))
+    load_dotenv(os.path.join(basedir, '.env'))
 
-# SQLAlchemy Engine Options for stability and performance
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    "pool_pre_ping": True,
-    "pool_recycle": 300,
-    "pool_size": 5,
-    "max_overflow": 10,
-}
-
-# Initialize Extensions
-app.config['COMPRESS_REGISTER'] = True
-Compress(app)
-
-# Explicit origins list for CORS (cannot use "*" with supports_credentials=True)
-origins = [
-    app.config.get('FRONTEND_URL', 'https://edusence.vercel.app'),
-    'http://localhost:5173',
-    'https://localhost:5173',
-    'http://127.0.0.1:5173',
-    'https://127.0.0.1:5173',
-    'http://localhost:3000',
-    re.compile(r"https://.*\.vercel\.app"),
-    re.compile(r"https://.*\.railway\.app")
-]
-
-CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
-db.init_app(app)
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*", # Allow all for SocketIO handshake (REST API remains protected by standard CORS above)
-    ping_timeout=60,
-    ping_interval=25,
-    async_mode='eventlet'
-)
-
-# Auto-create tables and indexes if they don't exist
+# Auto-create tables and indexes
 with app.app_context():
     db.create_all()
-    # Manual indexing is risky on every startup if the DB is remote/slow
-    # Only run it once or if explicitly triggered in a real production env
+    # Manual indexing
     if os.environ.get('RUN_MIGRATIONS_ON_START', 'true').lower() == 'true':
         try:
             from sqlalchemy import text
-            # Ensure we don't block startup too long
             indexes = [
                 "CREATE INDEX IF NOT EXISTS idx_attention_student ON attention_logs(student_id)",
                 "CREATE INDEX IF NOT EXISTS idx_attention_session ON attention_logs(session_id)",
@@ -88,7 +52,7 @@ with app.app_context():
                 db.session.execute(text(sql))
             db.session.commit()
         except Exception as e:
-            print(f"[WARNING] Manual indexing skipped/failed: {str(e)}", flush=True)
+            print(f"[WARNING] Manual indexing failed: {str(e)}", flush=True)
             db.session.rollback()
 
 # --- Internal State ---

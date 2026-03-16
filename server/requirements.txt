@@ -11,3 +11,4 @@ gunicorn==21.2.0
 setuptools
 PyJWT
 eventlet==0.33.3
+Flask-Compress==1.14

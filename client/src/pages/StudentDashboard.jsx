@@ -35,8 +35,8 @@ const StudentDashboard = () => {
             if (isFetching || consecutiveFailures >= 3) return;
             isFetching = true;
             try {
-                // Short 3s timeout - if it's not fast, don't wait. Avoids blocking workers.
-                const res = await api.get(`/api/get_student_stats/${user.id}`, { timeout: 3000 });
+                // Increased to 15s - background sync needs more patience for cold starts
+                const res = await api.get(`/api/get_student_stats/${user.id}`, { timeout: 15000 });
                 if (res.data && res.data.success && res.data.logs?.length > 0) {
                     setPersonalAttention(Math.round(res.data.logs[0].attention_score));
                     consecutiveFailures = 0; // Reset on success
@@ -56,9 +56,8 @@ const StudentDashboard = () => {
             }
         };
 
-        fetchStats();
-        // Increase interval to 60s to further reduce server load
-        const interval = setInterval(fetchStats, 60000);
+        const interval = setInterval(fetchStats, 60000); // Poll every 60s
+        fetchStats(); // Initial fetch
         return () => clearInterval(interval);
     }, [user?.id]);
 
