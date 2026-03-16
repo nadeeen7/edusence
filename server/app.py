@@ -67,24 +67,9 @@ socketio = SocketIO(
     async_mode='eventlet'
 )
 
-# Auto-create tables and indexes
-with app.app_context():
-    db.create_all()
-    # Manual indexing
-    if os.environ.get('RUN_MIGRATIONS_ON_START', 'true').lower() == 'true':
-        try:
-            from sqlalchemy import text
-            indexes = [
-                "CREATE INDEX IF NOT EXISTS idx_attention_student ON attention_logs(student_id)",
-                "CREATE INDEX IF NOT EXISTS idx_attention_session ON attention_logs(session_id)",
-                "CREATE INDEX IF NOT EXISTS idx_sessions_room ON monitoring_sessions(room_code)"
-            ]
-            for sql in indexes:
-                db.session.execute(text(sql))
-            db.session.commit()
-        except Exception as e:
-            print(f"[WARNING] Manual indexing failed: {str(e)}", flush=True)
-            db.session.rollback()
+# Tables are already created in production DB.
+# db.create_all() is intentionally NOT called here to prevent blocking the event loop on startup.
+# Run `flask db upgrade` or a one-time script if schema changes are needed.
 
 # --- Internal State ---
 classroom_sessions = {} # { room_code: { students: { id: { name, attention, ... } }, active: bool } }
