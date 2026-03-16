@@ -26,23 +26,27 @@ const StudentDashboard = () => {
 
     useEffect(() => {
         if (!user?.id) return;
-
+        
+        // Track consecutive failures to stop hammering the server if it's struggling
+        let consecutiveFailures = 0;
         let isFetching = false;
+        
         const fetchStats = async () => {
-            if (isFetching) return;
+            if (isFetching || consecutiveFailures >= 3) return;
             isFetching = true;
             try {
-                // Use a short timeout for background stats so they don't block the UI
-                const res = await api.get(`/api/get_student_stats/${user.id}`, { timeout: 5000 });
+                // Short 3s timeout - if it's not fast, don't wait. Avoids blocking workers.
+                const res = await api.get(`/api/get_student_stats/${user.id}`, { timeout: 3000 });
                 if (res.data && res.data.success && res.data.logs?.length > 0) {
                     setPersonalAttention(Math.round(res.data.logs[0].attention_score));
+                    consecutiveFailures = 0; // Reset on success
                 } else {
                     setPersonalAttention("---");
                 }
             } catch (error) {
-                // Silently handle background stats errors to keep dashboard clean
-                if (error.code === 'ECONNABORTED') {
-                    console.warn("Student stats fetch timed out - ignoring.");
+                if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+                    consecutiveFailures++;
+                    console.warn(`Stats fetch timeout (${consecutiveFailures}/3). Polling will pause if this continues.`);
                 } else {
                     console.error("Failed to fetch student stats:", error);
                 }
@@ -53,7 +57,8 @@ const StudentDashboard = () => {
         };
 
         fetchStats();
-        const interval = setInterval(fetchStats, 10000);
+        // Increase interval to 30s to reduce server load
+        const interval = setInterval(fetchStats, 30000);
         return () => clearInterval(interval);
     }, [user?.id]);
 

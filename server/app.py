@@ -67,9 +67,30 @@ socketio = SocketIO(
     async_mode='threading'
 )
 
-# Auto-create tables if they don't exist (works with both gunicorn and python app.py)
+# Auto-create tables and indexes if they don't exist
 with app.app_context():
     db.create_all()
+    try:
+        # Manually ensure indexes exist for existing databases
+        from sqlalchemy import text
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_attention_student ON attention_logs(student_id)",
+            "CREATE INDEX IF NOT EXISTS idx_attention_session ON attention_logs(session_id)",
+            "CREATE INDEX IF NOT EXISTS idx_attention_time ON attention_logs(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_alerts_student ON alerts(student_id)",
+            "CREATE INDEX IF NOT EXISTS idx_alerts_time ON alerts(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_student ON monitoring_sessions(student_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_room ON monitoring_sessions(room_code)",
+            "CREATE INDEX IF NOT EXISTS idx_meetings_teacher ON meeting_links(teacher_id)",
+            "CREATE INDEX IF NOT EXISTS idx_meetings_active ON meeting_links(is_active)"
+        ]
+        for sql in indexes:
+            db.session.execute(text(sql))
+        db.session.commit()
+        print("[INFO] Database indexes verified/created successfully", flush=True)
+    except Exception as e:
+        print(f"[WARNING] Failed to create manual indexes: {str(e)}", flush=True)
+        db.session.rollback()
 
 # --- Internal State ---
 classroom_sessions = {} # { room_code: { students: { id: { name, attention, ... } }, active: bool } }
