@@ -22,6 +22,17 @@ load_dotenv()
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# Fix for Render DATABASE_URL (postgres:// -> postgresql://)
+db_url = app.config.get('SQLALCHEMY_DATABASE_URI')
+if db_url and db_url.startswith("postgres://"):
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url.replace("postgres://", "postgresql://", 1)
+
+# SQLAlchemy Engine Options for stability
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+}
+
 # Initialize Extensions
 origins = [
     app.config.get('FRONTEND_URL', 'https://edusence.vercel.app'),
