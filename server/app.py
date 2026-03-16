@@ -23,13 +23,15 @@ app.config.from_object(Config)
 
 # Initialize Extensions
 origins = [
-    app.config.get('FRONTEND_URL', 'https://192.168.1.5:5173'),
+    app.config.get('FRONTEND_URL', 'https://edusence.vercel.app'),
     'http://localhost:5173',
     'https://localhost:5173',
     'http://127.0.0.1:5173',
     'https://127.0.0.1:5173',
     'http://192.168.1.5:5173',
-    'https://192.168.1.5:5173'
+    'https://192.168.1.5:5173',
+    'https://edusence.vercel.app',
+    'https://edusence-fp9xgs1ab-nadeeen7s-projects.vercel.app'
 ]
 
 CORS(app, supports_credentials=True, origins=origins, expose_headers=["Content-Disposition"])
