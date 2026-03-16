@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Card from "../components/Card";
 import Notification from "../components/Notification";
+import QRScanner from "../components/QRScanner";
 import api from "../services/api";
 import { useAuth } from "../services/AuthContext";
 
@@ -11,6 +12,7 @@ const StudentDashboard = () => {
     const [notification, setNotification] = useState(null);
     const [personalAttention, setPersonalAttention] = useState("---");
     const [loadingJoin, setLoadingJoin] = useState(false);
+    const [showScanner, setShowScanner] = useState(false);
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -81,11 +83,40 @@ const StudentDashboard = () => {
         }
     };
 
+    const handleQRScan = useCallback((code) => {
+        setShowScanner(false);
+        setJoinRoomId(code);
+        // Auto-join after scan
+        setLoadingJoin(true);
+        setNotification({ type: "success", message: `Scanned: ${code} — Joining...` });
+        (async () => {
+            try {
+                const validateRes = await api.get(`/api/validate_room?code=${code}`);
+                if (!validateRes.data || !validateRes.data.valid) {
+                    setNotification({ type: "error", message: validateRes.data.message || "Invalid Room ID from QR." });
+                    setLoadingJoin(false);
+                    return;
+                }
+                const sessionRes = await api.post("/api/start_session", { student_id: user.id, room: code });
+                if (sessionRes.data?.success) {
+                    setTimeout(() => navigate(`/monitor?room=${code}&session=${sessionRes.data.session_id}`), 500);
+                } else {
+                    setNotification({ type: "error", message: sessionRes.data.message || "Failed to start session." });
+                    setLoadingJoin(false);
+                }
+            } catch (err) {
+                setNotification({ type: "error", message: err.response?.data?.message || "Connection error." });
+                setLoadingJoin(false);
+            }
+        })();
+    }, [navigate, user?.id]);
+
     if (!user) return null;
 
     return (
         <div className="flex items-center justify-center min-h-[80vh] animate-fade-in">
             {notification && <Notification {...notification} onClose={() => setNotification(null)} />}
+            {showScanner && <QRScanner onScan={handleQRScan} onClose={() => setShowScanner(false)} />}
 
             <div className="w-full max-w-lg">
                 <div className="text-center mb-8">
@@ -139,6 +170,24 @@ const StudentDashboard = () => {
                             )}
                         </button>
                     </form>
+
+                    <div className="flex items-center gap-3 my-4">
+                        <div className="flex-1 h-px bg-slate-700/50"></div>
+                        <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">or</span>
+                        <div className="flex-1 h-px bg-slate-700/50"></div>
+                    </div>
+
+                    <button
+                        onClick={() => setShowScanner(true)}
+                        disabled={loadingJoin}
+                        className="w-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-40 text-white font-bold py-3.5 px-6 rounded-xl transition-all border border-slate-700/50 hover:border-purple-500/30 flex items-center justify-center gap-3 text-sm group"
+                    >
+                        <svg className="w-5 h-5 text-purple-400 group-hover:text-purple-300 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                        </svg>
+                        Scan QR Code
+                    </button>
+
                     <p className="text-[10px] text-slate-600 mt-4 text-center">
                         By joining, you agree to share your camera feed for automated attention monitoring.
                     </p>
