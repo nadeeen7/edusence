@@ -15,9 +15,12 @@ const TeacherLogin = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setLoading(true);
         setIsLongLoading(false);
+        setNotification(null);
+
         const timer = setTimeout(() => {
-            if (loading) setIsLongLoading(true);
+            setIsLongLoading(true);
         }, 10000);
 
         try {
