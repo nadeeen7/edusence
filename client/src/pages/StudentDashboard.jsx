@@ -57,6 +57,7 @@ const StudentDashboard = () => {
                 navigate(`/monitor?room=${roomId}&session=${sessionRes.data.session_id}`);
             } else {
                 setNotification({ type: "error", message: sessionRes.data.message || "Failed to start monitoring session." });
+                setLoadingJoin(false);
             }
         } catch (err) {
             const errorMsg = err.response?.data?.message || "Connection error. Please try again later.";

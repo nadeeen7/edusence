@@ -369,8 +369,15 @@ def generate_meeting_link(current_user):
 @token_required
 def start_session(current_user):
     try:
-        if not isinstance(current_user, Student):
-            return jsonify({'success': False, 'message': 'Only students can join sessions'}), 403
+        # Robust role check: try isinstance, then check if it's a Student instance by ID prefix
+        is_student = isinstance(current_user, Student)
+        if not is_student and hasattr(current_user, 'id'):
+            # Fallback check for ID prefix often used for students
+            is_student = str(current_user.id).startswith('STU')
+            
+        if not is_student:
+            return jsonify({'success': False, 'message': f'Access denied: Only students can join sessions. Your ID: {getattr(current_user, "id", "Unknown")}'}), 403
+            
         data = request.json
         student_id = current_user.id
         room = data.get('room')
