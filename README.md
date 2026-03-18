@@ -243,7 +243,8 @@ Students log in, enter the room code on their dashboard, and join the class. The
 On the student's device, **MediaPipe Face Mesh** runs locally in the browser:
 - Detects **468 facial landmarks** per frame
 - Calculates **Eye Aspect Ratio (EAR)** to detect drowsiness or closed eyes
-- Calculates **Mouth Aspect Ratio (MAR)** to detect yawning
+- Performs **Iris Tracking** (Landmarks 468–477) to detect precise eye gaze direction
+- Calculates **Mouth Aspect Ratio (MAR)** to detect yawning or distraction
 - Estimates **head pose** (yaw and pitch) to detect looking away
 - Computes a composite **attention score (0–100%)** every second
 - Streams the score to the server via Socket.IO
