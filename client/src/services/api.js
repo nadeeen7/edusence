@@ -21,14 +21,50 @@ api.interceptors.request.use(config => {
     return Promise.reject(error);
 });
 
-// Response interceptor for global error handling
+// Response interceptor for global error handling and auto-token refresh
 api.interceptors.response.use(
     response => {
         console.log(`API Response: ${response.status} ${response.config.url}`);
         return response;
     },
-    error => {
-        const message = error.response?.data?.message || error.message || 'Server connection failed';
+    async error => {
+        const originalRequest = error.config;
+        const message = error.response?.data?.message || '';
+
+        // Handle 401 "Token has expired" and prevent infinite loops
+        if (error.response?.status === 401 && (message.includes('Token has expired') || message.includes('expired')) && !originalRequest._retry) {
+            originalRequest._retry = true;
+            const refreshToken = localStorage.getItem('refresh_token');
+
+            if (refreshToken) {
+                try {
+                    console.log("Token expired. Attempting to refresh...");
+                    // Using axios directly to avoid the interceptor loop
+                    const res = await axios.post(`${api.defaults.baseURL}/api/refresh`, {
+                        refresh_token: refreshToken
+                    });
+
+                    if (res.data.success && res.data.token) {
+                        const newToken = res.data.token;
+                        localStorage.setItem('token', newToken);
+                        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+                        console.log("Token refreshed successfully. Retrying request.");
+                        return api(originalRequest);
+                    }
+                } catch (refreshError) {
+                    console.error("Refresh token failed or expired:", refreshError);
+                    // If refresh fails, clear all and redirect to login
+                    localStorage.clear();
+                    window.location.href = '/student-login';
+                }
+            } else {
+                // No refresh token available
+                localStorage.clear();
+                window.location.href = '/student-login';
+            }
+        }
+
+        const errorMessage = error.response?.data?.message || error.message || 'Server connection failed';
         console.error(`API Error details:`, {
             status: error.response?.status,
             data: error.response?.data,
@@ -37,7 +73,8 @@ api.interceptors.response.use(
         });
 
         if (!error.response) {
-            alert(`Network Error: ${message}. Check if both backend and frontend servers are running.`);
+            // Only show alert for network-level errors (server down)
+            // alert(`Network Error: ${errorMessage}. Check if both backend and frontend servers are running.`);
         }
         return Promise.reject(error);
     }

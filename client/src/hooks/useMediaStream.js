@@ -118,6 +118,10 @@ export const useMediaStream = () => {
         };
     }, []);
 
+    const clearError = useCallback(() => {
+        setError(null);
+    }, []);
+
     return {
         stream: streamRef.current, // Static ref access
         hasStream,
@@ -127,6 +131,7 @@ export const useMediaStream = () => {
         toggleVideo,
         toggleAudio,
         videoEnabled,
-        audioEnabled
+        audioEnabled,
+        clearError
     };
 };

@@ -19,7 +19,7 @@ const TeacherLogin = () => {
         try {
             const res = await api.post("/login", { ...formData, role: 'teacher' });
             if (res.data.success) {
-                login(res.data.user, res.data.token);
+                login(res.data.user, res.data.token, res.data.refresh_token);
                 setNotification({ type: "success", message: "Login successful!" });
                 setTimeout(() => navigate("/teacher-dashboard"), 1000);
             }

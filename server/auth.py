@@ -5,10 +5,10 @@ from flask import request, jsonify, current_app
 from models import Teacher, Student
 
 def generate_token(user_id, role):
-    """Generate JWT token for a user"""
+    """Generate SHORT-LIVED JWT access token (1 hour)"""
     try:
         payload = {
-            'exp': datetime.utcnow() + timedelta(days=7),
+            'exp': datetime.utcnow() + timedelta(hours=1),
             'iat': datetime.utcnow(),
             'sub': str(user_id),
             'role': role
@@ -20,6 +20,34 @@ def generate_token(user_id, role):
         )
     except Exception as e:
         return str(e)
+
+def generate_refresh_token(user_id, role):
+    """Generate LONG-LIVED JWT refresh token (30 days)"""
+    try:
+        payload = {
+            'exp': datetime.utcnow() + timedelta(days=30),
+            'iat': datetime.utcnow(),
+            'sub': str(user_id),
+            'role': role,
+            'type': 'refresh'
+        }
+        return jwt.encode(
+            payload,
+            current_app.config['JWT_SECRET_KEY'],
+            algorithm='HS256'
+        )
+    except Exception as e:
+        return str(e)
+
+def verify_refresh_token(token):
+    """Verify a refresh token and return user_id, role"""
+    try:
+        data = jwt.decode(token, current_app.config['JWT_SECRET_KEY'], algorithms=["HS256"])
+        if data.get('type') == 'refresh':
+            return data['sub'], data['role']
+        return None, None
+    except:
+        return None, None
 
 def token_required(f):
     """Decorator to protect routes with JWT"""

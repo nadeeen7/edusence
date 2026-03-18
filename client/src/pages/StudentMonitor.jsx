@@ -115,7 +115,8 @@ const StudentMonitor = () => {
         videoEnabled,
         audioEnabled,
         toggleVideo,
-        toggleAudio
+        toggleAudio,
+        clearError
     } = useMediaStream();
 
     // 2. Socket Management
@@ -532,7 +533,7 @@ const StudentMonitor = () => {
             {(notification || mediaError) && (
                 <div className="absolute top-20 right-6 z-[110]">
                     {notification && <Notification {...notification} onClose={() => setNotification(null)} />}
-                    {mediaError && <Notification type="error" message={mediaError.toString()} onClose={() => { }} />}
+                    {mediaError && <Notification type="error" message={mediaError.toString()} onClose={clearError} />}
                 </div>
             )}
             {endBanner && (
@@ -569,6 +570,15 @@ const StudentMonitor = () => {
                                     autoPlay playsInline muted
                                     className={`w-full h-full object-cover bg-slate-950 scale-x-[-1] ${!videoEnabled ? 'hidden' : ''}`}
                                 />
+                                <div className="absolute top-2 left-2 z-30">
+                                    {handRaised && (
+                                        <div className="bg-amber-400 text-slate-950 p-1.5 rounded-full shadow-lg border-2 border-white">
+                                            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                                                <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z"/>
+                                            </svg>
+                                        </div>
+                                    )}
+                                </div>
                                 {!videoEnabled && (
                                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 space-y-4">
                                         <div className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">

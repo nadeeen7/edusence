@@ -147,8 +147,10 @@ const FocusedStudentVideo = React.memo(({ student, stream }) => {
                     </div>
                     <div className="flex items-center gap-3">
                         {student.hand_raised && (
-                            <div className="bg-yellow-500 text-black p-2 rounded-full shadow-lg animate-bounce border-2 border-white/30">
-                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1v3a1 1 0 01-1 1h-3v1a1 1 0 01-2 0v-1H6a1 1 0 01-1-1v-3H4a1 1 0 01-1-1V5a1 1 0 011-1h3V3a1 1 0 011-1h2z"></path></svg>
+                            <div className="bg-amber-400 text-slate-950 p-2 rounded-full shadow-lg border-2 border-white/30">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                                    <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z"/>
+                                </svg>
                             </div>
                         )}
                         <div className={`bg-gradient-to-r ${attnColor} px-4 py-2 rounded-xl shadow-lg`}>
@@ -211,8 +213,10 @@ const ThumbnailVideo = React.memo(({ student, stream, onClick, isTeacher, videoR
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 shrink-0 min-w-0">
                         {student?.hand_raised && (
-                            <div className="bg-yellow-500 text-black p-0.5 rounded-full shadow-lg animate-bounce border border-white shrink-0">
-                                <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1v3a1 1 0 01-1 1h-3v1a1 1 0 01-2 0v-1H6a1 1 0 01-1-1v-3H4a1 1 0 01-1-1V5a1 1 0 011-1h3V3a1 1 0 011-1h2z"></path></svg>
+                            <div className="bg-amber-400 text-slate-950 p-0.5 rounded-full shadow-lg border border-white shrink-0">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="w-2.5 h-2.5">
+                                    <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z"/>
+                                </svg>
                             </div>
                         )}
                         <span className="text-[9px] font-bold text-white truncate">{isTeacher ? 'You (Teacher)' : student?.name}</span>
@@ -276,8 +280,10 @@ const StudentVideoGrid = React.memo(({ student, stream, onClick }) => {
 
             <div className="absolute top-2 left-2 z-30">
                 {student.hand_raised && (
-                    <div className="bg-yellow-500 text-black p-1.5 rounded-full shadow-lg animate-bounce border-2 border-white">
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1v3a1 1 0 01-1 1h-3v1a1 1 0 01-2 0v-1H6a1 1 0 01-1-1v-3H4a1 1 0 01-1-1V5a1 1 0 011-1h3V3a1 1 0 011-1h2z"></path></svg>
+                    <div className="bg-amber-400 text-slate-950 p-1.5 rounded-full shadow-lg border-2 border-white">
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                            <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z"/>
+                        </svg>
                     </div>
                 )}
             </div>
@@ -452,7 +458,8 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
         videoEnabled,
         audioEnabled,
         toggleVideo,
-        toggleAudio
+        toggleAudio,
+        clearError
     } = useMediaStream();
 
     // 2. Socket Management
@@ -738,7 +745,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
             {(notification || mediaError) && (
                 <div className="absolute top-20 right-6 z-[110]">
                     {notification && <Notification {...notification} onClose={() => setNotification(null)} />}
-                    {mediaError && <Notification type="error" message={mediaError.toString()} onClose={() => { }} />}
+                    {mediaError && <Notification type="error" message={mediaError.toString()} onClose={clearError} />}
                 </div>
             )}
 

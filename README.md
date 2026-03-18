@@ -2,7 +2,7 @@
   <h1 align="center">🎓 EduSense</h1>
   <p align="center"><strong>AI-Powered Classroom Attention Monitoring System</strong></p>
   <p align="center">
-    Real-time student engagement tracking using computer vision and WebRTC
+    Real-time student engagement tracking using computer vision, WebRTC, and professional dashboard analytics.
   </p>
 </p>
 
@@ -25,11 +25,13 @@ The system solves a critical problem in online education: **teachers cannot see 
 | **Live Teacher Dashboard** | Real-time student video grid with individual attention percentages, status indicators, and controls |
 | **Simple Dashboard Portal** | Minimalist teacher interface focused on session starts, attendance tracking and analytics download |
 | **WebRTC Video Streaming** | Peer-to-peer video/audio between teacher and students with robust track management |
-| **Raise Hand** | Students can raise their hand during class; teachers see notifications instantly via Socket.IO |
+| **QR Code Joining** | Students can instantly join classes by scanning the teacher's QR code or clicking a mobile access link |
+| **Raise Hand** | Students can raise their hand during class; teachers see professional notifications instantly via Socket.IO |
 | **Mic & Camera Toggle** | Students can mute/unmute audio and enable/disable video, with state synced to the teacher's view |
 | **Session Insights** | Post-class analytics showing duration, average engagement %, and student count per session |
 | **CSV Report Download** | Teachers can download a CSV report of student performance after each session |
-| **Role-Based Auth** | Separate login portals for teachers and students with JWT-based authentication |
+| **JWT Token Refresh** | Enhanced security with automatic session refresh and "Invalid Token" recovery logic |
+| **Role-Based Auth** | Separate login portals for teachers and students with secure JWT-based authentication |
 | **Mobile-Ready Design** | Responsive layout optimized for mobile browsers with stable Swap View functionality |
 | **Persistent Sessions** | Active class sessions persist across page refreshes via `localStorage` |
 
@@ -93,6 +95,7 @@ AI Processing (Client-Side):
 | **React Router v7** | Client-side routing |
 | **Lucide React** | Icon library |
 | **MediaPipe Face Mesh** | Client-side AI face landmark detection |
+| **html5-qrcode** | High-performance QR code scanning library |
 | **WebRTC** | Peer-to-peer video/audio streaming |
 
 ### Backend
@@ -245,6 +248,8 @@ On the student's device, **MediaPipe Face Mesh** runs locally in the browser:
 - Computes a composite **attention score (0–100%)** every second
 - Streams the score to the server via Socket.IO
 
+### 4. Teacher Observes
+The teacher monitors the class through a live dashboard:
 - **Live Student Grid** — Immersive gallery of all connected students
 - **Real-time Metrics** — Per-student attention % and class average updates
 - **Session Controls** — Persistent room code share, hand-raise alerts, and session management
@@ -322,6 +327,8 @@ After ending the class, the **Teacher Dashboard** provides:
 | **Student Dashboard** | Clean interface to enter room code and join a class |
 
 ---
+
+## 🗺️ Roadmap
 
 - [ ] **Multi-class History** — Browse analytics from all past sessions, not just the last one
 - [ ] **Emotion Detection** — Extend AI to detect student emotions (confused, bored, engaged)

@@ -14,24 +14,30 @@ export const AuthProvider = ({ children }) => {
     });
 
     const [token, setToken] = useState(() => localStorage.getItem('token') || null);
+    const [refreshToken, setRefreshToken] = useState(() => localStorage.getItem('refresh_token') || null);
 
     // Since we read entirely synchronously from local storage on mount, loading is false instantly.
     const [loading, setLoading] = useState(false);
 
     // Removed cross-tab storage listener as it caused unstable unmounts on same-tab storage changes
 
-    const login = (userData, token) => {
+    const login = (userData, token, refresh_token) => {
         // Clear ALL previous auth data to prevent stale tokens across roles
         localStorage.removeItem('user');
         localStorage.removeItem('token');
+        localStorage.removeItem('refresh_token');
         localStorage.removeItem('teacher_info');
         localStorage.removeItem('student_info');
         localStorage.removeItem('active_class_code');
 
         setUser(userData);
         setToken(token);
+        setRefreshToken(refresh_token);
         localStorage.setItem('user', JSON.stringify(userData));
         localStorage.setItem('token', token);
+        if (refresh_token) {
+            localStorage.setItem('refresh_token', refresh_token);
+        }
         if (userData.role === 'teacher') {
             localStorage.setItem('teacher_info', JSON.stringify(userData));
         } else {
@@ -42,11 +48,12 @@ export const AuthProvider = ({ children }) => {
     const logout = () => {
         setUser(null);
         setToken(null);
+        setRefreshToken(null);
         localStorage.clear();
     };
 
     return (
-        <AuthContext.Provider value={{ user, token, loading, login, logout }}>
+        <AuthContext.Provider value={{ user, token, refreshToken, loading, login, logout }}>
             {children}
         </AuthContext.Provider>
     );

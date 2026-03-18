@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
-const Notification = ({ type, message, onClose }) => {
+const Notification = ({ type = 'info', message, onClose, duration = 3000 }) => {
     const [visible, setVisible] = useState(false);
     const [exiting, setExiting] = useState(false);
 
@@ -11,15 +11,22 @@ const Notification = ({ type, message, onClose }) => {
         }
     }, [message]);
 
+    const onCloseRef = useRef(onClose);
     useEffect(() => {
-        if (message && onClose) {
+        onCloseRef.current = onClose;
+    }, [onClose]);
+
+    useEffect(() => {
+        if (message && onCloseRef.current) {
             const timer = setTimeout(() => {
                 setExiting(true);
-                setTimeout(onClose, 300);
-            }, 2000);
+                setTimeout(() => {
+                    if (onCloseRef.current) onCloseRef.current();
+                }, 300);
+            }, duration);
             return () => clearTimeout(timer);
         }
-    }, [message, onClose]);
+    }, [message, duration]);
 
     if (!message) return null;
 

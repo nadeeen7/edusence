@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 # Local Imports
 from config import Config
 from models import db, Teacher, Student, MonitoringSession, AttentionLog, Alert, MeetingLink, SessionAnalytics
-from auth import generate_token, token_required
+from auth import generate_token, generate_refresh_token, verify_refresh_token, token_required
 
 # Load environment variables
 load_dotenv()
@@ -103,9 +103,11 @@ def login():
 
         if user and verify_password(user.password, password):
             token = generate_token(user.id, role)
+            refresh_token = generate_refresh_token(user.id, role)
             return jsonify({
                 'success': True,
                 'token': token,
+                'refresh_token': refresh_token,
                 'user': {
                     'id': user.id,
                     'name': user.name,
@@ -124,7 +126,28 @@ def login():
                 'message': f'This email is registered as a {other_role}. Please use the {other_role} login portal.'
             }), 401
             
-        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+        return jsonify({'success': False, 'message': 'Incorrect email or password'}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/refresh', methods=['POST'])
+def refresh():
+    """Exchange refresh token for new access token"""
+    try:
+        data = request.json
+        refresh_token = data.get('refresh_token')
+        if not refresh_token:
+            return jsonify({'success': False, 'message': 'Refresh token missing'}), 400
+            
+        user_id, role = verify_refresh_token(refresh_token)
+        if not user_id:
+            return jsonify({'success': False, 'message': 'Invalid or expired refresh token'}), 401
+            
+        new_token = generate_token(user_id, role)
+        return jsonify({
+            'success': True,
+            'token': new_token
+        }), 200
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 

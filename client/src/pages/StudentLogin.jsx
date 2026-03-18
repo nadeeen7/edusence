@@ -21,7 +21,7 @@ const StudentLogin = () => {
             const res = await api.post("/login", { ...formData, role: 'student' });
             if (res.data.success) {
                 setNotification({ type: "success", message: "Login successful!" });
-                login(res.data.user, res.data.token);
+                login(res.data.user, res.data.token, res.data.refresh_token);
                 setTimeout(() => navigate(`/student-dashboard${location.search}`), 1000);
             }
         } catch (err) {
