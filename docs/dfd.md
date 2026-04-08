@@ -1,13 +1,13 @@
-# EduSense AI Classroom - Data Flow Diagrams (DFD)
+# LearnLens AI Classroom - Data Flow Diagrams (DFD)
 
-This document outlines the data flow within the EduSense AI Classroom system, moving from high-level context to detailed process-specific flows.
+This document outlines the data flow within the LearnLens AI Classroom system, moving from high-level context to detailed process-specific flows.
 
 ## Level 0: Context Diagram
 The Context Diagram defines the system boundary and the interactions between the system and external entities.
 
 ```mermaid
 graph LR
-    subgraph System ["EduSense AI Classroom"]
+    subgraph System ["LearnLens AI Classroom"]
     end
 
     Teacher ((Teacher))

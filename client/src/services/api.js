@@ -53,28 +53,49 @@ api.interceptors.response.use(
                     }
                 } catch (refreshError) {
                     console.error("Refresh token failed or expired:", refreshError);
-                    // If refresh fails, clear all and redirect to login
+                    
+                    // Intelligent redirect: check role before clearing
+                    const user = JSON.parse(localStorage.getItem('user') || '{}');
+                    const redirectPath = user.role === 'teacher' ? '/teacher-login' : '/student-login';
+                    
                     localStorage.clear();
-                    window.location.href = '/student-login';
+                    window.location.href = redirectPath;
                 }
             } else {
                 // No refresh token available
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                const redirectPath = user.role === 'teacher' ? '/teacher-login' : '/student-login';
+                
                 localStorage.clear();
-                window.location.href = '/student-login';
+                window.location.href = redirectPath;
             }
         }
 
-        const errorMessage = error.response?.data?.message || error.message || 'Server connection failed';
+        let errorMessage = 'Server connection failed';
+        
+        if (error.response) {
+            errorMessage = error.response.data?.message || `Error: ${error.response.status}`;
+        } else if (error.request) {
+            // Request was made but no response received
+            if (error.code === 'ECONNABORTED') {
+                errorMessage = 'Request timed out. Please try again.';
+            } else {
+                errorMessage = 'Cannot reach the server. Please ensure the backend is running.';
+            }
+        } else {
+            errorMessage = error.message;
+        }
+
         console.error(`API Error details:`, {
             status: error.response?.status,
-            data: error.response?.data,
-            message: error.message,
+            code: error.code,
+            message: errorMessage,
             url: error.config?.url
         });
 
-        if (!error.response) {
-            // Only show alert for network-level errors (server down)
-            // alert(`Network Error: ${errorMessage}. Check if both backend and frontend servers are running.`);
+        if (!error.response && !originalRequest._retry) {
+            // Log network errors specifically
+            console.error("Network Error - Possible Backend Down:", error);
         }
         return Promise.reject(error);
     }

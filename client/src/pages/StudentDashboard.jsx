@@ -47,7 +47,7 @@ const StudentDashboard = () => {
 
     const handleLogout = () => {
         logout();
-        navigate("/");
+        navigate("/", { replace: true });
     };
 
     const parseQRData = (text) => {
@@ -92,8 +92,8 @@ const StudentDashboard = () => {
 
             if (sessionRes.data && sessionRes.data.success) {
                 setNotification({ type: "success", message: "Success! Entering classroom..." });
-                // Remove artificial delay for "instant" feel
-                navigate(`/monitor?room=${roomId}&session=${sessionRes.data.session_id}`);
+                // Use replace to prevent back navigation to dashboard join form
+                navigate(`/monitor?room=${roomId}&session=${sessionRes.data.session_id}`, { replace: true });
             } else {
                 setNotification({ type: "error", message: sessionRes.data.message || "Failed to join session." });
                 setLoadingJoin(false);
@@ -135,7 +135,7 @@ const StudentDashboard = () => {
                         </svg>
                     </div>
                     <h1 className="text-3xl font-black text-white tracking-tight mb-2">
-                        Welcome, <span className="text-purple-400">{user.name || "Student"}</span>
+                        Welcome, <span className="text-purple-400">{user?.name || "Student"}</span>
                     </h1>
                     <p className="text-slate-500 text-sm">Enter your classroom code to join a live session</p>
                 </div>

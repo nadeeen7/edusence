@@ -1,10 +1,10 @@
-# Edusence Project Study Guide
+# LearnLens Project Study Guide
 
-This document provides a detailed explanation of the **Edusence** codebase. It is designed to help you study and understand the architecture, logic, and implementation details of the application.
+This document provides a detailed explanation of the **LearnLens** codebase. It is designed to help you study and understand the architecture, logic, and implementation details of the application.
 
 ## 1. Project Overview
 
-**Edusence** is an AI-powered classroom monitoring system. It allows teachers to create virtual classrooms where they can monitor student attention and engagement in real-time.
+**LearnLens** is an AI-powered classroom monitoring system. It allows teachers to create virtual classrooms where they can monitor student attention and engagement in real-time.
 
 ### Key Technologies
 *   **Backend**: Python (Flask), SQLite (Database), Socket.IO (Real-time communication).

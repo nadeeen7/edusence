@@ -52,7 +52,7 @@ def verify_password(hashed_password, password):
 
 @app.route('/')
 def index():
-    return jsonify({"status": "Online Attention Detector API is running"}), 200
+    return jsonify({"status": "LearnLens API is running"}), 200
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -423,12 +423,12 @@ def handle_join_room(data):
 
     join_room(room)
     if room not in classroom_sessions:
-        classroom_sessions[room] = {"students": {}, "active": True, "history": []}
+        classroom_sessions[room] = {"students": {}, "active": True, "history": [], "is_screen_sharing": False}
 
     if role == 'teacher':
         join_room(room)
         classroom_sessions[room]["teacher_sid"] = request.sid
-        emit('room_joined', {'room': room, 'role': 'teacher'})
+        emit('room_joined', {'room': room, 'role': 'teacher', 'is_screen_sharing': classroom_sessions[room].get('is_screen_sharing', False)})
         emit('teacher_joined', {'teacher_id': user_id, 'teacher_name': user_name}, room=room, include_self=False)
         recalculate_and_broadcast_stats(room, include_students=True)
     else:
@@ -441,7 +441,7 @@ def handle_join_room(data):
             "status": "Focused",
             "hand_raised": False
         }
-        emit('room_joined', {'room': room, 'role': 'student'})
+        emit('room_joined', {'room': room, 'role': 'student', 'is_screen_sharing': classroom_sessions[room].get('is_screen_sharing', False)})
         emit('user_joined', {'id': request.sid, 'student_id': user_id, 'student_name': user_name}, room=room, include_self=False)
         recalculate_and_broadcast_stats(room, include_students=True)
 
@@ -632,6 +632,34 @@ def handle_answer(data): emit('student_answer', data, room=data['room'], include
 def handle_ice(data):
     if 'to' in data: emit('ice_candidate', data, room=data['to'])
     else: emit('ice_candidate', data, room=data['room'], include_self=False)
+
+# Screen Sharing Signaling
+@socketio.on('screen_share_start')
+def handle_screen_share_start(data):
+    room = data.get('room')
+    if room in classroom_sessions:
+        classroom_sessions[room]['is_screen_sharing'] = True
+    emit('screen_share_started', data, room=room, include_self=False)
+
+@socketio.on('screen_share_stop')
+def handle_screen_share_stop(data):
+    room = data.get('room')
+    if room in classroom_sessions:
+        classroom_sessions[room]['is_screen_sharing'] = False
+    emit('screen_share_stopped', data, room=room, include_self=False)
+
+@socketio.on('screen_offer')
+def handle_screen_offer(data):
+    emit('screen_offer', data, room=data['to'])
+
+@socketio.on('screen_answer')
+def handle_screen_answer(data):
+    emit('screen_answer', data, room=data['room'], include_self=False)
+
+@socketio.on('screen_ice_candidate')
+def handle_screen_ice(data):
+    if 'to' in data: emit('screen_ice_candidate', data, room=data['to'])
+    else: emit('screen_ice_candidate', data, room=data['room'], include_self=False)
 
 def recalculate_and_broadcast_stats(room, include_students=False):
     if room not in classroom_sessions: return

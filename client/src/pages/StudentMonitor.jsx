@@ -87,8 +87,11 @@ const StudentMonitor = () => {
     const [handRaised, setHandRaised] = useState(false);
     const [swapped, setSwapped] = useState(false); // false = teacher big, student PIP
     const [notification, setNotification] = useState(null);
+    const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const [screenStream, setScreenStream] = useState(null);
 
     const pcRef = useRef(null);
+    const screenPcRef = useRef(null);
     const faceMeshRef = useRef(null);
     const mlLoopRef = useRef(null);
     const hiddenVideoRef = useRef(null);
@@ -122,7 +125,7 @@ const StudentMonitor = () => {
     // 2. Socket Management
     // Delay joining until we at least tried to get media (prevents track-less PC)
     const activeRoomCode = (hasStudentStream || mediaError) ? roomCode : null;
-    const { connected, emit, on } = useSocketSession(activeRoomCode, user, 'student');
+    const { connected, emit, on, socket } = useSocketSession(activeRoomCode, user, 'student');
 
     const videoEnabledRef = useRef(videoEnabled);
 
@@ -216,33 +219,44 @@ const StudentMonitor = () => {
                 lookingDownStartRef.current = null;
             }
             
-            // 3. Eye Gaze (Iris Tracking)
-            // Left iris: 468, Right iris: 473
-            // Left eye corners: 33 (inner), 133 (outer)
-            // Right eye corners: 362 (inner), 263 (outer)
+            // 3. Eye Gaze (Iris/Pupil Tracking)
+            // Patient's RIGHT Eye (Camera Left): Outer 33, Inner 133, Iris 468
+            // Patient's LEFT Eye (Camera Right): Outer 263, Inner 362, Iris 473
             if (landmarks.length > 473 && landmarks[468] && landmarks[473]) {
-                const irisL = landmarks[468];
-                const irisR = landmarks[473];
-                const eyeLInner = landmarks[33];
-                const eyeLOuter = landmarks[133];
-                const eyeRInner = landmarks[362];
-                const eyeROuter = landmarks[263];
+                const irisR = landmarks[468]; // Right Iris
+                const irisL = landmarks[473]; // Left Iris
+                
+                // Horizontal Gaze
+                const eyeWidthR = Math.abs(landmarks[133].x - landmarks[33].x);
+                const eyeWidthL = Math.abs(landmarks[263].x - landmarks[362].x);
 
-                const eyeWidthL = Math.abs(eyeLOuter.x - eyeLInner.x);
-                const eyeWidthR = Math.abs(eyeROuter.x - eyeRInner.x);
+                if (eyeWidthR > 0.005 && eyeWidthL > 0.005) {
+                    const gazeRatioR = (irisR.x - landmarks[33].x) / eyeWidthR;
+                    const gazeRatioL = (irisL.x - landmarks[362].x) / eyeWidthL;
+                    const avgGazeH = (gazeRatioR + gazeRatioL) / 2;
 
-                if (eyeWidthL > 0.005 && eyeWidthR > 0.005) {
-                    const gazeRatioL = (irisL.x - eyeLInner.x) / eyeWidthL;
-                    const gazeRatioR = (irisR.x - eyeRInner.x) / eyeWidthR;
-                    const avgGaze = (gazeRatioL + gazeRatioR) / 2;
+                    // Vertical Gaze (Pupil up/down)
+                    // Right eye vertical range: 159 (top), 145 (bottom)
+                    // Left eye vertical range: 386 (top), 374 (bottom)
+                    const eyeHeightR = Math.abs(landmarks[145].y - landmarks[159].y);
+                    const eyeHeightL = Math.abs(landmarks[374].y - landmarks[386].y);
+                    const gazeRatioRV = (irisR.y - landmarks[159].y) / eyeHeightR;
+                    const gazeRatioLV = (irisL.y - landmarks[386].y) / eyeHeightL;
+                    const avgGazeV = (gazeRatioRV + gazeRatioLV) / 2;
 
-                    // Center is ~0.5; further from 0.5 = looking away
-                    const gazeDeviation = Math.abs(avgGaze - 0.5);
-                    const gazeThreshold = isMobile ? 0.18 : 0.12;
+                    // Analysis
+                    const hDeviation = Math.abs(avgGazeH - 0.5);
+                    const vDeviation = Math.abs(avgGazeV - 0.5);
+                    
+                    const hThreshold = isMobile ? 0.22 : 0.15; // Slightly wider for mobile
+                    const vThreshold = 0.25;
 
-                    if (!isNaN(gazeDeviation) && gazeDeviation > gazeThreshold) {
-                        score -= 45;
-                        if (status === "Focused") status = "Looking Away (Eyes)";
+                    if (hDeviation > hThreshold || vDeviation > vThreshold) {
+                        score -= 50;
+                        if (status === "Focused") {
+                            if (hDeviation > hThreshold) status = avgGazeH > 0.5 ? "Looking Right" : "Looking Left";
+                            else status = avgGazeV > 0.5 ? "Looking Down" : "Looking Up";
+                        }
                     }
                 }
             }
@@ -315,9 +329,6 @@ const StudentMonitor = () => {
             const vid = hiddenVideoRef.current;
             if (vid.readyState >= 2) {
                 try {
-                    if (Math.random() < 0.1) {
-                        console.log(`[ML] Frame Check: ${vid.videoWidth}x${vid.videoHeight}, ready=${vid.readyState}`);
-                    }
                     await faceMesh.send({ image: vid });
                 } catch (e) {
                     console.error("ML processing failed:", e);
@@ -325,7 +336,7 @@ const StudentMonitor = () => {
             } else {
                 if (vid.paused) vid.play().catch(() => { });
             }
-        }, 500);
+        }, 300);
     }, [onFaceResults]);
 
     // Sync local studentStream to Ref and Video Elements (re-runs on swap)
@@ -378,7 +389,7 @@ const StudentMonitor = () => {
 
     useEffect(() => {
         if (!user || !roomCode) {
-            navigate('/student-dashboard');
+            navigate('/student-dashboard', { replace: true });
             return;
         }
 
@@ -387,7 +398,7 @@ const StudentMonitor = () => {
                 const res = await api.get(`/api/validate_room?code=${roomCode}`);
                 if (!res.data.valid) {
                     setStatusMessage(res.data.message || "Invalid Session");
-                    setTimeout(() => navigate('/student-dashboard'), 3000);
+                    setTimeout(() => navigate('/student-dashboard', { replace: true }), 3000);
                     return;
                 }
 
@@ -409,7 +420,14 @@ const StudentMonitor = () => {
     useEffect(() => {
         if (!connected) return;
 
-        on('room_joined', () => setStatusMessage("Connected to Live Class"));
+        on('room_joined', (data) => {
+            setStatusMessage("Connected to Live Class");
+            if (data.is_screen_sharing) {
+                setIsScreenSharing(true);
+                // The teacher will likely send an offer anyway, but we can also signal that we are ready
+                emit('request_screen_share', { room: roomCode, studentId: user?.id, socketId: socket.id });
+            }
+        });
         on('teacher_joined', (data) => setStatusMessage(`Teacher ${data.teacher_name} Joined`));
         on('join_denied', (data) => {
             setStatusMessage(data.message || "Join Denied");
@@ -417,10 +435,10 @@ const StudentMonitor = () => {
         });
 
         on('teacher_offer', async (data) => {
-            console.log("Teacher offer received, creating student answer...");
+            console.log(`[WebRTC] Received teacher offer (${roomCode}). Creating answer...`);
             if (pcRef.current) {
+                console.log("[WebRTC] Closing existing PC before creating new one");
                 pcRef.current.close();
-                tracksAddedRef.current = false;
             }
             const pc = new RTCPeerConnection({
                 iceServers: [
@@ -433,55 +451,125 @@ const StudentMonitor = () => {
                 iceCandidatePoolSize: 10
             });
             pcRef.current = pc;
+            pc.pendingCandidates = [];
 
-            pc.oniceconnectionstatechange = () => console.log("ICE Connection State:", pc.iceConnectionState);
-            pc.onconnectionstatechange = () => console.log("Peer Connection State:", pc.connectionState);
+            pc.oniceconnectionstatechange = () => console.log(`[WebRTC] ICE state: ${pc.iceConnectionState}`);
+            pc.onconnectionstatechange = () => console.log(`[WebRTC] Connection state: ${pc.connectionState}`);
 
             pc.ontrack = (event) => {
-                console.log(`Student received teacher track: ${event.track.kind}`);
+                console.log(`[WebRTC] Received teacher track: ${event.track.kind}`);
                 const track = event.track;
                 setTeacherStream(prev => {
                     const stream = prev || new MediaStream();
                     if (!stream.getTracks().some(t => t.id === track.id)) {
                         stream.addTrack(track);
                     }
-                    return new MediaStream(stream.getTracks()); // New identity to trigger render
+                    return new MediaStream(stream.getTracks());
                 });
             };
 
             if (studentStreamRef.current) {
-                console.log("Adding local tracks (Audio + Video) to PC");
+                console.log("[WebRTC] Adding local student tracks to PC");
                 studentStreamRef.current.getTracks().forEach(track => {
-                    console.log(`Adding track: ${track.kind} (Enabled: ${track.enabled})`);
-                    const senders = pc.getSenders();
-                    const trackExists = senders.some(sender => sender.track === track);
-                    if (!trackExists) {
-                        pc.addTrack(track, studentStreamRef.current);
-                    }
+                    pc.addTrack(track, studentStreamRef.current);
                 });
                 tracksAddedRef.current = true;
-            } else {
-                console.warn("No student stream available yet to add to PC");
             }
 
             pc.onicecandidate = (event) => {
-                if (event.candidate) emit('ice_candidate', { room: roomCode, student_id: user.id, candidate: event.candidate });
+                if (event.candidate) {
+                    console.log("[WebRTC] student generated ICE candidate");
+                    emit('ice_candidate', { room: roomCode, student_id: user.id, candidate: event.candidate });
+                }
             };
+
             try {
                 await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
+                console.log("[WebRTC] Sending student answer to teacher");
                 emit('student_answer', { room: roomCode, student_id: user.id, answer: answer });
-                console.log("Student answer sent to teacher");
+
+                // Process any queued candidates accumulated while setting up
+                if (pc.pendingCandidates.length > 0) {
+                    console.log(`[WebRTC] Processing ${pc.pendingCandidates.length} queued candidates`);
+                    for (const candidate of pc.pendingCandidates) {
+                        await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.error("Error adding queued candidate:", e));
+                    }
+                    pc.pendingCandidates = [];
+                }
             } catch (err) {
-                console.error("Error creating student answer:", err);
+                console.error("Error handling teacher offer:", err);
             }
         });
 
         on('ice_candidate', async (data) => {
-            if (pcRef.current && data.candidate) {
-                try { await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate)); }
-                catch (err) { console.error("Error adding ice candidate:", err); }
+            if (data.student_id === user?.id) return; // Ignore our own candidate if it bounced back
+
+            const pc = pcRef.current;
+            if (pc && data.candidate) {
+                try {
+                    if (pc.remoteDescription && pc.remoteDescription.type) {
+                        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    } else {
+                        console.log("[WebRTC] Queuing teacher candidate (remoteDescription not ready)");
+                        if (!pc.pendingCandidates) pc.pendingCandidates = [];
+                        pc.pendingCandidates.push(data.candidate);
+                    }
+                } catch (err) {
+                    console.error("Error adding ice candidate from teacher:", err);
+                }
+            }
+        });
+
+        // --- Screen Share Signaling ---
+        on('screen_share_started', (data) => {
+            setNotification({ type: 'info', message: `${data.teacher_name} started screen sharing` });
+            setIsScreenSharing(true);
+        });
+
+        on('screen_share_stopped', () => {
+            setIsScreenSharing(false);
+            setScreenStream(null);
+            if (screenPcRef.current) {
+                screenPcRef.current.close();
+                screenPcRef.current = null;
+            }
+        });
+
+        on('screen_offer', async (data) => {
+            console.log("Teacher screen offer received...");
+            if (screenPcRef.current) screenPcRef.current.close();
+            
+            const pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+            screenPcRef.current = pc;
+
+            pc.ontrack = (event) => {
+                console.log("Received screen track");
+                setScreenStream(event.streams[0]);
+                setIsScreenSharing(true);
+            };
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) emit('screen_ice_candidate', { room: roomCode, student_id: user.id, candidate: event.candidate });
+            };
+
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                emit('screen_answer', { room: roomCode, student_id: user.id, answer: answer });
+            } catch (err) {
+                console.error("Error answering screen offer:", err);
+            }
+        });
+
+        on('screen_ice_candidate', async (data) => {
+            if (screenPcRef.current && data.candidate) {
+                try { await screenPcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate)); }
+                catch (err) { console.error("Error adding screen ice candidate:", err); }
             }
         });
 
@@ -489,18 +577,21 @@ const StudentMonitor = () => {
             console.log("Class ended notification received");
             setEndBanner("Class has ended. Redirecting...");
             setTimeout(() => {
-                navigate('/student-dashboard');
+                navigate('/student-dashboard', { replace: true });
             }, 3000);
         };
         on('class_ended', handleClassEnded);
         on('kicked', () => {
             setEndBanner("You have been removed from this session.");
-            setTimeout(() => navigate('/student-dashboard'), 3000);
+            setTimeout(() => navigate('/student-dashboard', { replace: true }), 3000);
         });
         on('notification', (data) => setNotification(data));
 
-        return () => { if (pcRef.current) pcRef.current.close(); };
-    }, [connected, emit, navigate, on, roomCode, user?.id, user?.name]);
+        return () => { 
+            if (pcRef.current) pcRef.current.close(); 
+            if (screenPcRef.current) screenPcRef.current.close();
+        };
+    }, [connected, emit, navigate, on, roomCode, user?.id, user?.name, socket?.id]);
 
     useEffect(() => {
         return () => {
@@ -515,6 +606,10 @@ const StudentMonitor = () => {
             if (pcRef.current) {
                 pcRef.current.close();
                 pcRef.current = null;
+            }
+            if (screenPcRef.current) {
+                screenPcRef.current.close();
+                screenPcRef.current = null;
             }
         };
     }, []);
@@ -592,17 +687,36 @@ const StudentMonitor = () => {
                         ) : (
                             /* Teacher is Big */
                             <>
-                                <TeacherVideo stream={teacherStream} />
-                                {!teacherStream && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center space-y-6 bg-slate-900/80 backdrop-blur-md">
-                                        <div className="relative">
-                                            <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-                                            <div className="absolute inset-0 w-16 h-16 border-4 border-transparent border-b-purple-500/40 rounded-full animate-spin-reverse"></div>
-                                        </div>
-                                        <p className="text-sm font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Syncing Teacher Feed...</p>
+                                {isScreenSharing && screenStream ? (
+                                    <div className="w-full h-full flex flex-col">
+                                         <div className="flex-1 min-h-0 relative">
+                                            <video
+                                                ref={(el) => { if (el && screenStream) el.srcObject = screenStream; }}
+                                                autoPlay playsInline
+                                                className="w-full h-full object-contain bg-slate-900"
+                                            />
+                                            <div className="absolute top-3 left-3 bg-emerald-600/90 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg text-white border border-white/10 shadow-lg z-20">Teacher Screen</div>
+                                         </div>
+                                         {/* Move teacher camera to a small overlay if screen sharing */}
+                                         <div className="absolute bottom-4 right-4 w-32 sm:w-48 aspect-video rounded-xl overflow-hidden border-2 border-slate-700 shadow-2xl z-20">
+                                            <TeacherVideo stream={teacherStream} />
+                                         </div>
                                     </div>
+                                ) : (
+                                    <>
+                                        <TeacherVideo stream={teacherStream} />
+                                        {!teacherStream && (
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center space-y-6 bg-slate-900/80 backdrop-blur-md">
+                                                <div className="relative">
+                                                    <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+                                                    <div className="absolute inset-0 w-16 h-16 border-4 border-transparent border-b-purple-500/40 rounded-full animate-spin-reverse"></div>
+                                                </div>
+                                                <p className="text-sm font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Syncing Teacher Feed...</p>
+                                            </div>
+                                        )}
+                                        <div className="absolute top-3 right-3 bg-blue-600/90 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg text-white border border-white/10 shadow-lg">Teacher</div>
+                                    </>
                                 )}
-                                <div className="absolute top-3 right-3 bg-blue-600/90 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg text-white border border-white/10 shadow-lg">Teacher</div>
                             </>
                         )}
                     </div>
@@ -725,8 +839,8 @@ const StudentMonitor = () => {
                 className="opacity-0 pointer-events-none absolute left-0 top-0 z-[-1]"
                 style={{
                     visibility: 'visible',
-                    width: '160px',
-                    height: '120px',
+                    width: '640px',
+                    height: '480px',
                     position: 'fixed'
                 }}
             />

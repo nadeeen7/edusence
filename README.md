@@ -1,6 +1,6 @@
 <p align="center">
-  <h1 align="center">🎓 EduSense</h1>
-  <p align="center"><strong>AI-Powered Classroom Attention Monitoring System</strong></p>
+  <h1 align="center">📽️ LearnLens</h1>
+  <p align="center"><strong>Focus, made visible.</strong></p>
   <p align="center">
     Real-time student engagement tracking using computer vision, WebRTC, and professional dashboard analytics.
   </p>
@@ -10,9 +10,9 @@
 
 ## 📖 About
 
-**EduSense** is an intelligent classroom monitoring platform that uses AI-powered face tracking to measure student attention in real time during live online classes. Teachers can start a session, observe student engagement through a live dashboard, and review post-session analytics — all from a single unified interface.
+**LearnLens** is an intelligent classroom monitoring platform that uses AI-powered face tracking to measure student attention in real time during live online classes. Teachers can start a session, observe student engagement through a live dashboard, and review post-session analytics — all from a single unified interface.
 
-The system solves a critical problem in online education: **teachers cannot see if students are actually paying attention**. EduSense uses MediaPipe Face Mesh to analyze facial landmarks (eye aspect ratio, mouth aspect ratio, head pose), compute an attention score, and stream it live to the teacher's dashboard.
+The system solves a critical problem in online education: **teachers cannot see if students are actually paying attention**. LearnLens uses MediaPipe Face Mesh to analyze facial landmarks (eye aspect ratio, mouth aspect ratio, head pose), compute an attention score, and stream it live to the teacher's dashboard.
 
 ---
 
@@ -121,7 +121,7 @@ AI Processing (Client-Side):
 ## 📁 Project Structure
 
 ```
-edusense/
+learnlens/
 ├── client/                          # React Frontend
 │   ├── src/
 │   │   ├── components/              # Reusable UI components
@@ -177,8 +177,8 @@ edusense/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/nadeeen7/edusence.git
-cd edusence
+git clone https://github.com/nadeeen7/learnlens.git
+cd learnlens
 ```
 
 ### 2. Backend Setup

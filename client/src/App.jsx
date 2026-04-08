@@ -1,6 +1,7 @@
 import { Routes, Route, useLocation, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
+import PublicRoute from "./components/PublicRoute";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 import Home from "./pages/Home";
@@ -21,10 +22,10 @@ function App() {
       {!isFullscreenView && <Navbar />}
       <main className={`${isFullscreenView ? 'h-screen w-screen overflow-hidden' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'}`}>
         <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/teacher-login" element={<TeacherLogin />} />
-          <Route path="/student-login" element={<StudentLogin />} />
+          <Route path="/" element={<PublicRoute><Home /></PublicRoute>} />
+          <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+          <Route path="/teacher-login" element={<PublicRoute><TeacherLogin /></PublicRoute>} />
+          <Route path="/student-login" element={<PublicRoute><StudentLogin /></PublicRoute>} />
 
           <Route path="/teacher-dashboard" element={
             <ProtectedRoute role="teacher">

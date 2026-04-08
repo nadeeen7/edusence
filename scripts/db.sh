@@ -1,8 +1,8 @@
 #!/bin/bash
 # =============================================================
-# DB ACTIONS — Edusence Project
+# DB ACTIONS — LearnLens Project
 # Run all commands from the project ROOT directory:
-#   /Users/afsalazeez/Projects/nazeem/edusence
+#   /Users/afsalazeez/Projects/nazeem/learnlens
 # =============================================================
 
 DB="classroom.db"

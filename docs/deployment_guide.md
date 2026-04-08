@@ -1,6 +1,6 @@
-# EduSense Deployment Guide
+# LearnLens Deployment Guide
 
-This guide provides step-by-step instructions for deploying the EduSense AI Classroom project to production environments.
+This guide provides step-by-step instructions for deploying the LearnLens AI Classroom project to production environments.
 
 ## 🚀 Deployment Strategy Overview
 
@@ -32,7 +32,7 @@ Add these in the Render dashboard:
 | `DATABASE_URL` | Your PostgreSQL URL |
 | `SECRET_KEY` | A long random string |
 | `JWT_SECRET_KEY` | A long random string |
-| `FRONTEND_URL` | Your Vercel URL (e.g., `https://edusense.vercel.app`) |
+| `FRONTEND_URL` | Your Vercel URL (e.g., `https://learnlens.vercel.app`) |
 | `PYTHON_VERSION` | `3.9` or higher |
 
 ---
@@ -49,7 +49,7 @@ Add these in the Render dashboard:
 Add these in the Vercel dashboard:
 | Variable | Value |
 |---|---|
-| `VITE_API_URL` | Your Render Web Service URL (e.g., `https://edusense-backend.onrender.com`) |
+| `VITE_API_URL` | Your Render Web Service URL (e.g., `https://learnlens-backend.onrender.com`) |
 
 ### 3. Deploy
 - Click **Deploy**.

@@ -430,9 +430,14 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
     const [showShareModal, setShowShareModal] = useState(false);
 
     const pcRefs = useRef({});
+    const screenPcRefs = useRef({}); // Separate PCs for screen share
     const teacherVideoRef = useRef(null);
     const teacherStreamRef = useRef(null);
+    const screenStreamRef = useRef(null);
+    const [screenStream, setScreenStream] = useState(null);
+    const [isScreenSharing, setIsScreenSharing] = useState(false);
     const pendingCallsRef = useRef([]); // Track students waiting for teacher stream
+    const pendingScreenCallsRef = useRef([]); // Track students waiting for screen stream
     const [trendData, setTrendData] = useState(() => {
         const saved = localStorage.getItem('trend_data');
         try {
@@ -484,7 +489,10 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
     }, [connected, roomCode, emit]);
 
     const initiateCall = useCallback(async (socketId, studentId, localStream) => {
-        if (pcRefs.current[studentId]) pcRefs.current[studentId].close();
+        if (pcRefs.current[studentId]) {
+            console.log(`Closing existing PC for ${studentId}`);
+            pcRefs.current[studentId].close();
+        }
 
         const pc = new RTCPeerConnection({
             iceServers: [
@@ -497,18 +505,27 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
             iceCandidatePoolSize: 10
         });
         pcRefs.current[studentId] = pc;
+        pc.pendingCandidates = [];
+
+        console.log(`[WebRTC] Created PC for student ${studentId}. State: ${pc.connectionState}`);
+
+        pc.oniceconnectionstatechange = () => {
+            console.log(`[WebRTC] ICE state (${studentId}): ${pc.iceConnectionState}`);
+            if (pc.iceConnectionState === 'failed') {
+                console.warn(`[WebRTC] ICE Failed for ${studentId}. Attempting restart?`);
+                pc.restartIce();
+            }
+        };
+
+        pc.onconnectionstatechange = () => {
+            console.log(`[WebRTC] Connection state (${studentId}): ${pc.connectionState}`);
+        };
 
         if (localStream) {
             console.log("Adding teacher tracks to peer connection for:", studentId);
             localStream.getTracks().forEach(track => {
-                const senders = pc.getSenders();
-                const trackExists = senders.some(sender => sender.track === track);
-                if (!trackExists) {
-                    pc.addTrack(track, localStream);
-                }
+                pc.addTrack(track, localStream);
             });
-        } else {
-            console.warn("Initiating call without teacher stream for:", studentId);
         }
 
         pc.ontrack = (event) => {
@@ -519,13 +536,13 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 if (!existingStream.getTracks().some(t => t.id === track.id)) {
                     existingStream.addTrack(track);
                 }
-                // Return new identity for the stream container to trigger React re-renders in sub-components
                 return { ...prev, [studentId]: new MediaStream(existingStream.getTracks()) };
             });
         };
 
         pc.onicecandidate = (event) => {
             if (event.candidate) {
+                console.log(`[WebRTC] Generated ICE candidate for ${studentId}`);
                 emit('ice_candidate', { to: socketId, candidate: event.candidate, student_id: 'teacher' });
             }
         };
@@ -533,11 +550,107 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
         try {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
+            console.log(`[WebRTC] Sending offer to ${studentId}`);
             emit('teacher_offer', { room: roomCode, to: socketId, offer });
         } catch (err) {
             console.error("Error creating teacher offer:", err);
         }
     }, [emit, roomCode]);
+
+    const initiateScreenCall = useCallback(async (socketId, studentId, localStream) => {
+        if (!localStream) return;
+        if (screenPcRefs.current[studentId]) screenPcRefs.current[studentId].close();
+
+        const pc = new RTCPeerConnection({
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' }
+            ]
+        });
+        screenPcRefs.current[studentId] = pc;
+
+        localStream.getTracks().forEach(track => {
+            pc.addTrack(track, localStream);
+        });
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                emit('screen_ice_candidate', { to: socketId, candidate: event.candidate, student_id: 'teacher' });
+            }
+        };
+
+        try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            emit('screen_offer', { room: roomCode, to: socketId, offer });
+        } catch (err) {
+            console.error("Error creating screen offer:", err);
+        }
+    }, [emit, roomCode]);
+
+    const stopScreenShare = useCallback(() => {
+        if (screenStreamRef.current) {
+            screenStreamRef.current.getTracks().forEach(track => track.stop());
+            screenStreamRef.current = null;
+        }
+        setScreenStream(null);
+        setIsScreenSharing(false);
+        emit('screen_share_stop', { room: roomCode });
+        
+        // Close all screen peer connections
+        Object.values(screenPcRefs.current).forEach(pc => pc.close());
+        screenPcRefs.current = {};
+    }, [emit, roomCode]);
+
+    const startScreenShare = useCallback(async () => {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+            setNotification({ 
+                type: 'error', 
+                message: "Screen sharing is only supported on desktop browsers. Handheld devices do not support display capture." 
+            });
+            return;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({
+                video: { cursor: "always" },
+                audio: false
+            });
+            
+            screenStreamRef.current = stream;
+            setScreenStream(stream);
+            setIsScreenSharing(true);
+            
+            setNotification({ 
+                type: 'info', 
+                message: "Screen Sharing Active! Tip: To avoid the 'Mirror Tunnel' effect, share a specific 'Window' or 'Tab' instead of 'Entire Screen'.",
+                duration: 8000
+            });
+            
+            emit('screen_share_start', { room: roomCode, teacher_name: user?.name });
+
+            // Handle browser-level stop share
+            stream.getVideoTracks()[0].onended = () => {
+                stopScreenShare();
+            };
+
+            // Initiate call to all current students
+            activeStudents.forEach(async student => {
+                if (student.socketId) {
+                    console.log("Initiating screen call to existing student:", student.name);
+                    await initiateScreenCall(student.socketId, student.id, stream);
+                }
+            });
+            
+            // Re-broadcast to all rooms via server instead of individual emits here? 
+            // Better to initiate calls to each socket.
+            // Let's rely on individual signaling once the student receives screen_share_started.
+        } catch (err) {
+            console.error("Error starting screen share:", err);
+            setNotification({ type: 'error', message: "Failed to share screen: " + err.message });
+        }
+    }, [emit, roomCode, user?.name, activeStudents, stopScreenShare]);
 
     // Sync teacherStream Ref and Video Element
     useEffect(() => {
@@ -577,10 +690,11 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                         attention: 0,
                         status: 'Connecting',
                         audioEnabled: true,
-                        videoEnabled: true
+                        videoEnabled: true,
+                        socketId: data.id
                     }];
                 }
-                return prev;
+                return prev.map(s => s.id === data.student_id ? { ...s, socketId: data.id } : s);
             });
 
             // Crucial for mobile: ensure we have a stream and session is active before calling
@@ -591,6 +705,12 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 console.warn("User joined but teacher stream not ready yet. Adding to pending calls.");
                 pendingCallsRef.current.push({ socketId: data.id, studentId: data.student_id });
             }
+
+            // Also initiate screen share call if active
+            if (screenStreamRef.current) {
+                console.log("Initiating screen call to joiner:", data.student_name);
+                await initiateScreenCall(data.id, data.student_id, screenStreamRef.current);
+            }
         });
 
         on('student_left', (data) => {
@@ -598,6 +718,10 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
             if (pcRefs.current[sid]) {
                 pcRefs.current[sid].close();
                 delete pcRefs.current[sid];
+            }
+            if (screenPcRefs.current[sid]) {
+                screenPcRefs.current[sid].close();
+                delete screenPcRefs.current[sid];
             }
             setStudentStreams(prev => {
                 const next = { ...prev };
@@ -699,7 +823,17 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
             const pc = pcRefs.current[data.student_id];
             if (pc) {
                 try {
+                    console.log(`[WebRTC] Received student answer from ${data.student_id}`);
                     await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    
+                    // Process any queued candidates
+                    if (pc.pendingCandidates && pc.pendingCandidates.length > 0) {
+                        console.log(`[WebRTC] Processing ${pc.pendingCandidates.length} queued candidates for ${data.student_id}`);
+                        for (const candidate of pc.pendingCandidates) {
+                            await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.error("Error adding queued candidate:", e));
+                        }
+                        pc.pendingCandidates = [];
+                    }
                 } catch (err) {
                     console.error("Error setting remote description:", err);
                 }
@@ -707,16 +841,54 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
         });
 
         on('ice_candidate', async (data) => {
-            const pc = pcRefs.current[data.student_id];
+            // Teacher receives candidates from student (data.student_id)
+            const sid = data.student_id;
+            if (sid === 'teacher') return; // Ignore our own broadcast if it came back
+
+            const pc = pcRefs.current[sid];
             if (pc && data.candidate) {
                 try {
-                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    if (pc.remoteDescription) {
+                        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    } else {
+                        console.log(`[WebRTC] Queuing ICE candidate for ${sid} (Remote description not set)`);
+                        if (!pc.pendingCandidates) pc.pendingCandidates = [];
+                        pc.pendingCandidates.push(data.candidate);
+                    }
                 } catch (err) {
-                    console.error("Error adding ice candidate:", err);
+                    console.error(`Error adding ice candidate for ${sid}:`, err);
                 }
             }
         });
 
+        on('screen_answer', async (data) => {
+            const pc = screenPcRefs.current[data.student_id];
+            if (pc) {
+                try {
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                } catch (err) {
+                    console.error("Error setting remote screen description:", err);
+                }
+            }
+        });
+
+        on('screen_ice_candidate', async (data) => {
+            const pc = screenPcRefs.current[data.student_id];
+            if (pc && data.candidate) {
+                try {
+                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } catch (err) {
+                    console.error("Error adding screen ice candidate:", err);
+                }
+            }
+        });
+
+        // Triggered by students asking for screen
+        on('request_screen_share', async (data) => {
+            if (screenStreamRef.current) {
+                await initiateScreenCall(data.socketId, data.studentId, screenStreamRef.current);
+            }
+        });
 
         return () => {
             console.log("Cleaning up LiveSession - closing all PeerConnections");
@@ -724,7 +896,11 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 console.log(`Closing PC for student, last state: ${pc.connectionState}`);
                 pc.close();
             });
+            Object.values(screenPcRefs.current).forEach(pc => {
+                pc.close();
+            });
             pcRefs.current = {};
+            screenPcRefs.current = {};
         };
     }, [connected, emit, on, roomCode, initiateCall]);
 
@@ -752,16 +928,16 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
             {showShareModal && <ShareModal roomCode={roomCode} onClose={() => setShowShareModal(false)} />}
 
             {/* Premium Header */}
-            <header className="min-h-16 border-b border-slate-800 bg-slate-900/50 backdrop-blur-xl flex flex-col sm:flex-row items-center justify-between px-4 sm:px-6 py-3 sm:py-0 shrink-0 gap-4 sm:gap-0">
-                <div className="flex items-center gap-4">
-                    <div className="bg-blue-600/20 p-2 rounded-lg border border-blue-500/20">
+            <header className="min-h-16 border-b border-slate-800 bg-slate-900/50 backdrop-blur-xl flex flex-col sm:flex-row items-center justify-between px-3 sm:px-6 py-2 sm:py-0 shrink-0 gap-3 sm:gap-0">
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <div className="bg-blue-600/20 p-2 rounded-lg border border-blue-500/20 shrink-0">
                         <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
                     </div>
                     <div>
-                        <h2 className="text-sm font-black uppercase tracking-tighter">Live Classroom</h2>
-                        <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                            <span className="text-[10px] font-mono text-slate-400">ID: {roomCode}</span>
+                        <h2 className="text-[10px] sm:text-xs font-black uppercase tracking-tighter">Live Classroom</h2>
+                        <div className="flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                            <span className="text-[9px] font-mono text-slate-400">ID: {roomCode}</span>
                             <button
                                 onClick={() => {
                                     navigator.clipboard.writeText(roomCode);
@@ -770,42 +946,42 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                                 className="p-1 hover:bg-slate-800 rounded transition-colors group/copy"
                                 title="Copy Room Code"
                             >
-                                <svg className="w-3 h-3 text-slate-500 group-hover/copy:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                                <svg className="w-2.5 h-2.5 text-slate-500 group-hover/copy:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
                             </button>
                             <button
                                 onClick={() => setShowShareModal(true)}
-                                className="flex items-center gap-1.5 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border border-blue-500/20 transition-all ml-1"
+                                className="flex items-center gap-1 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border border-blue-500/20 transition-all ml-1"
                             >
-                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path></svg>
+                                <svg className="w-2 h-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path></svg>
                                 Share
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2 bg-slate-800/50 p-1 rounded-xl border border-slate-700">
+                <div className="flex items-center gap-1.5 bg-slate-800/50 p-1 rounded-xl border border-slate-700">
                     <button
                         onClick={() => setViewMode('gallery')}
-                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'gallery' ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                        className={`px-3 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all ${viewMode === 'gallery' ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
                     >
                         Gallery
                     </button>
                     <button
                         onClick={() => setViewMode('dashboard')}
-                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'dashboard' ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                        className={`px-3 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all ${viewMode === 'dashboard' ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
                     >
                         Dashboard
                     </button>
                 </div>
 
                 <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-                    <div className="flex flex-col items-end mr-2">
-                        <span className="text-[9px] sm:text-[10px] font-bold text-slate-400">Avg Attention</span>
+                    <div className="flex flex-col items-end mr-1 sm:mr-2">
+                        <span className="text-[8px] sm:text-[10px] font-bold text-slate-400">Avg Attention</span>
                         <div className="flex items-baseline gap-1">
-                            <span className="text-xl sm:text-3xl font-black text-white">{stats.classAvg}%</span>
+                            <span className="text-lg sm:text-3xl font-black text-white">{stats.classAvg}%</span>
                         </div>
                     </div>
-                    <button onClick={handleEndClass} className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 px-3 sm:px-4 py-2 rounded-lg text-[10px] sm:text-xs font-black uppercase transition-all whitespace-nowrap">End Class</button>
+                    <button onClick={handleEndClass} className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[9px] sm:text-xs font-black uppercase transition-all whitespace-nowrap">End Class</button>
                 </div>
             </header>
 
@@ -823,7 +999,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                     />
                 ) : (
                     <div className="max-w-6xl mx-auto space-y-6">
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                             <StatCard label="Active Students" value={stats.activeCount} />
                             <StatCard label="Class Average" value={`${stats.classAvg}%`} color="text-blue-400" />
                             <StatCard label="Low Attention" value={stats.lowAttn} color="text-yellow-400" />
@@ -835,62 +1011,57 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                                 <AttentionChart data={trendData} />
                             </Card>
                         </div>
-
                         <Card className="bg-slate-900 border-slate-800 overflow-hidden shadow-2xl">
-                            <table className="w-full text-left">
-                                <thead className="bg-slate-800/50 text-[10px] uppercase text-slate-500 font-black tracking-widest border-b border-slate-800">
-                                    <tr>
-                                        <th className="px-6 py-4">Student</th>
-                                        <th className="px-6 py-4">Attention Score</th>
-                                        <th className="px-6 py-4">Status</th>
-                                        <th className="px-6 py-4">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-800/50">
-                                    {activeStudents.map(student => (
-                                        <tr key={student.id} className="hover:bg-slate-800/20 transition-all">
-                                            <td className="px-6 py-4 flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-xs uppercase text-slate-300 relative">
-                                                    {student.name ? student.name[0] : '?'}
-                                                    {student.hand_raised && (
-                                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-500 rounded-full border-2 border-slate-900"></div>
-                                                    )}
-                                                </div>
-                                                <span className="font-bold">{student.name}</span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                                                        <div className={`h-full ${student.attention < 60 ? 'bg-red-500' : 'bg-blue-500'} transition-all duration-500`} style={{ width: `${student.attention}%` }}></div>
+                            <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                                <table className="w-full text-left min-w-[500px] sm:min-w-0">
+                                    <thead className="bg-slate-800/50 text-[10px] uppercase text-slate-500 font-black tracking-widest border-b border-slate-800">
+                                        <tr>
+                                            <th className="px-4 sm:px-6 py-4">Student</th>
+                                            <th className="px-4 sm:px-6 py-4">Attention Score</th>
+                                            <th className="px-4 sm:px-6 py-4">Status</th>
+                                            <th className="px-4 sm:px-6 py-4 text-right">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/50">
+                                        {activeStudents.map(student => (
+                                            <tr key={student.id} className="hover:bg-slate-800/20 transition-all">
+                                                <td className="px-4 sm:px-6 py-4 flex items-center gap-2 sm:gap-3">
+                                                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-[10px] sm:text-xs uppercase text-slate-300 relative shrink-0">
+                                                        {student.name ? student.name[0] : '?'}
+                                                        {student.hand_raised && (
+                                                            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-yellow-500 rounded-full border-2 border-slate-900"></div>
+                                                        )}
                                                     </div>
-                                                    <span className="text-xs font-black min-w-[30px]">{Math.round(student.attention)}%</span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${student.attention < 60 ? 'bg-red-500/20 text-red-400 border border-red-500/10' : 'bg-blue-500/20 text-blue-400 border border-blue-500/10'}`}>
-                                                    {student.attention < 60 ? 'Distracted' : 'Focused'}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    {/* Kick Student */}
-                                                    <div className="relative group/kick">
+                                                    <span className="font-bold text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none">{student.name}</span>
+                                                </td>
+                                                <td className="px-4 sm:px-6 py-4">
+                                                    <div className="flex items-center gap-2 sm:gap-3">
+                                                        <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden min-w-[40px] sm:min-w-0">
+                                                            <div className={`h-full ${student.attention < 60 ? 'bg-red-500' : 'bg-blue-500'} transition-all duration-500`} style={{ width: `${student.attention}%` }}></div>
+                                                        </div>
+                                                        <span className="text-[10px] sm:text-xs font-black min-w-[30px]">{Math.round(student.attention)}%</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 sm:px-6 py-4">
+                                                    <span className={`px-2 py-0.5 rounded-md text-[9px] sm:text-[10px] font-black uppercase tracking-wider ${student.attention < 60 ? 'bg-red-500/20 text-red-400 border border-red-500/10' : 'bg-blue-500/20 text-blue-400 border border-blue-500/10'}`}>
+                                                        {student.attention < 60 ? 'Distracted' : 'Focused'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 sm:px-6 py-4 text-right">
+                                                    <div className="flex items-center justify-end gap-2">
                                                         <button
                                                             onClick={() => emit('kick_student', { room: roomCode, student_id: student.id })}
                                                             className="w-8 h-8 rounded-lg bg-slate-800/50 border border-slate-700/50 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20 transition-all"
                                                         >
                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                                                         </button>
-                                                        <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-[10px] text-red-300 px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/kick:opacity-100 transition-opacity pointer-events-none border border-slate-700">
-                                                            Remove Student
-                                                        </span>
                                                     </div>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </Card>
                     </div>
                 )}
@@ -912,6 +1083,27 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                         label={videoEnabled ? 'Stop Video' : 'Start Video'}
                         icon={videoEnabled ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>}
                     />
+
+                    {navigator.mediaDevices?.getDisplayMedia ? (
+                        <ControlButton
+                            onClick={isScreenSharing ? stopScreenShare : startScreenShare}
+                            active={!isScreenSharing}
+                            label={isScreenSharing ? 'Stop Share' : 'Share Screen'}
+                            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>}
+                        />
+                    ) : (
+                        <div className="group relative">
+                            <ControlButton
+                                onClick={() => setNotification({ type: 'info', message: 'Screen sharing is only supported on desktop browsers.' })}
+                                active={false}
+                                label="Share Screen"
+                                icon={<svg className="w-5 h-5 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>}
+                            />
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-2 bg-slate-800 text-[10px] font-black uppercase text-slate-300 rounded-lg opacity-0 lg:group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-slate-700 shadow-2xl z-50">
+                                Desktop Only
+                            </div>
+                        </div>
+                    )}
 
                     <div className="w-px h-8 bg-slate-700 mx-2"></div>
 

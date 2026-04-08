@@ -2,7 +2,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../services/AuthContext";
 
 const ProtectedRoute = ({ children, role }) => {
-    const { user, loading } = useAuth();
+    const { user, loading, isAuthenticated } = useAuth();
     const location = useLocation();
 
     if (loading) {
@@ -13,13 +13,17 @@ const ProtectedRoute = ({ children, role }) => {
         );
     }
 
-    if (!user) {
+    if (!isAuthenticated) {
+        // If we know the required role, we can pre-select the login portal
         const redirectPath = role === "teacher" ? "/teacher-login" : "/student-login";
-        return <Navigate to={`${redirectPath}${location.search}`} replace />;
+        // Store the attempted URL so we can redirect back after login
+        return <Navigate to={redirectPath} state={{ from: location }} replace />;
     }
 
     if (role && user.role !== role) {
-        return <Navigate to="/" replace />;
+        // User is logged in but has the wrong role for this page
+        const fallbackPath = user.role === "teacher" ? "/teacher-dashboard" : "/student-dashboard";
+        return <Navigate to={fallbackPath} replace />;
     }
 
     return children;

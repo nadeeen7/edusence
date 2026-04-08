@@ -1,6 +1,6 @@
-# EduSense AI Classroom - Entity Relationship Diagram
+# LearnLens AI Classroom - Entity Relationship Diagram
 
-This document provides a clear representation of the database schema for the EduSense AI Classroom project.
+This document provides a clear representation of the database schema for the LearnLens AI Classroom project.
 
 ## ER Diagram (Mermaid Format)
 

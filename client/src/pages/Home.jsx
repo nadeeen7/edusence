@@ -1,15 +1,20 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
+import { useAuth } from "../services/AuthContext";
 import Card from "../components/Card";
 
 const Home = () => {
+    const { user, isAuthenticated } = useAuth();
+    const navigate = useNavigate();
+
     return (
         <div className="flex flex-col items-center justify-center min-h-[80vh] text-center space-y-12">
             <div className="space-y-6 max-w-3xl">
                 <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight">
-                    AI-Powered <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-600">Classroom Monitoring</span>
+                    LearnLens: <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-600">Focus, made visible.</span>
                 </h1>
                 <p className="text-xl text-gray-400">
-                    Enhance focus, track attention, and elevate the learning experience with real-time analytics.
+                    Real-time student engagement tracking using computer vision, WebRTC, and professional analytics.
                 </p>
             </div>
 
