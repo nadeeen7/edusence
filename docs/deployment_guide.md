@@ -23,7 +23,7 @@ This guide provides step-by-step instructions for deploying the LearnLens AI Cla
 - **Root Directory**: `server` (or keep as root and adjust build command).
 - **Runtime**: `Python`.
 - **Build Command**: `pip install -r ../requirements.txt`
-- **Start Command**: `gunicorn -w 1 app:app --bind 0.0.0.0:$PORT`
+- **Start Command**: `gunicorn -k eventlet -w 1 app:app --bind 0.0.0.0:$PORT`
 
 ### 3. Environment Variables
 Add these in the Render dashboard:

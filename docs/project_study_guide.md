@@ -1,96 +1,197 @@
-# LearnLens Project Study Guide
-
 This document provides a detailed explanation of the **LearnLens** codebase. It is designed to help you study and understand the architecture, logic, and implementation details of the application.
+
+## 🌟 The Mental Model (For Newcomers)
+If you need to explain LearnLens in 30 seconds: 
+> "It's a digital classroom where the **browser acts as an AI observer**. Instead of just sending video, the student's device analyzes their face locally to see if they are paying attention, then tells the teacher's dashboard. It uses **WebRTC** for video and **Socket.IO** for the 'brain' (AI data) flow."
+
+---
+
+## 🕒 The 3-Step Lifecycle of a Session
+
+### 1. The Setup (Admin/Teacher)
+- **Action**: Teacher logs in and creates a "Room".
+- **Code Flow**: `MeetingLink` entry is created in the DB. A unique 8-character code is generated.
+- **Key File**: `TeacherDashboard.jsx` + `api/generate_meeting_link`.
+
+### 2. The Live Monitoring (User/Student)
+- **Action**: Student enters the code and joins.
+- **Logic**: 
+    1. **MediaPipe** loads in the browser.
+    2. **EAR & Pitch** are calculated every few milliseconds.
+    3. Every 2 seconds, a `socket.emit('attention-update')` sends the score to the server.
+- **Key File**: `StudentMonitor.jsx` (where the AI loop lives).
+
+### 3. The Analytics (Post-Session)
+- **Action**: Teacher ends the class.
+- **Data Flow**: The server takes all the memory-cached scores, calculates the **true average** for each student, and saves a final snapshot to the `SessionAnalytics` table.
+- **Key File**: `app.py` (`handle_end_class` function).
+
+---
 
 ## 1. Project Overview
 
-**LearnLens** is an AI-powered classroom monitoring system. It allows teachers to create virtual classrooms where they can monitor student attention and engagement in real-time.
+**LearnLens** is a state-of-the-art AI-powered classroom monitoring system. It leverages real-time computer vision and WebRTC to provide teachers with deep insights into student engagement during virtual sessions.
 
 ### Key Technologies
-*   **Backend**: Python (Flask), SQLite (Database), Socket.IO (Real-time communication).
-*   **Frontend**: HTML, CSS (Tailwind), JavaScript.
-*   **AI/ML**: MediaPipe (Face Mesh), TensorFlow.js (Object Detection) - running entirely in the browser (Client-side).
-*   **Video**: WebRTC (Peer-to-Peer video streaming).
+*   **Frontend**: React 19 + Vite + TailwindCSS (Modern SPA architecture).
+*   **Backend**: Python (Flask) + Flask-SocketIO (Real-time signaling).
+*   **Database**: PostgreSQL (Production) or SQLite (Development) via **SQLAlchemy ORM**.
+*   **AI/ML**: **MediaPipe Face Mesh** running client-side (468 facial landmarks) for precise attention tracking.
+*   **Video/Audio**: **WebRTC** for peer-to-peer media streaming.
+*   **Security**: **JWT (JSON Web Tokens)** for role-based authentication and secure API access.
 
 ---
 
-## 2. Backend Architecture (`app.py`)
+## 2. Backend Architecture (`server/app.py`)
 
-The `app.py` file is the heart of the server. It handles:
-1.  **Web Request Routing**: Serving HTML pages.
-2.  **API Endpoints**: Data handling (Login, Session Start, Logs).
-3.  **Real-time Signaling**: WebSocket events for video calls and status updates.
+The backend serves as a secure REST API and a real-time signaling server.
 
-### Key Components in `app.py`
+### Core Responsibilities
+1.  **Authentication**: Validates users, issues JWTs, and handles token refreshes.
+2.  **Classroom State**: Manages an in-memory dictionary (`classroom_sessions`) of live class states (active students, attention levels, hand-raises).
+3.  **Data Persistence**: Uses SQLAlchemy models to save session history and analytics.
+4.  **Signaling**: Facilitates the "handshake" between teacher and student browsers to initiate WebRTC video streams.
 
-#### Database Management (`init_db`)
-The application uses SQLite (`classroom.db`). The `init_db` function sets up five main tables:
-*   `teachers` & `students`: User credentials.
-*   `monitoring_sessions`: Tracks a student's time in a specific class.
-*   `attention_logs`: Stores granular AI data (attention scores, head pose).
-*   `alerts`: Stores events like "Looking away" or "Phone detected".
-*   `meeting_links`: Manages active class sessions for teachers.
-
-#### Authentication
-Routes like `/student_login` and `/register` handle standard user authentication using session-based auth. Passwords are hashed using SHA-256 (`hash_password`) before storage, which is a security best practice.
-
-#### WebSocket Events (Socket.IO)
-This is crucial for the "Live" features.
-*   `@socketio.on('join_class')`: A student connects to a specific "room" (class).
-*   `@socketio.on('teacher_offer')` / `student_answer`: These are **WebRTC Signaling** events. They help the teacher's browser and student's browser shake hands to establish a direct video connection.
-*   `@socketio.on('log_attention')`: Receives live AI data from students and broadcasts updates to the teacher.
+### Key Models (`server/models.py`)
+The system consists of 7 interconnected entities:
+- **Teacher/Student**: Core user profiles with hashed credentials.
+- **MeetingLink**: Records of created class rooms (the "Room Code").
+- **MonitoringSession**: Individual records of a student's participation in a class.
+- **AttentionLog**: High-frequency time-series data of attention scores.
+- **Alert**: Behavioral anomalies (e.g., student looking away).
+- **SessionAnalytics**: Aggregated summaries generated when a class ends.
 
 ---
 
-## 3. Frontend: Student Monitor (`student_monitor.html`)
+## 3. Frontend Architecture (React)
 
-This is the most complex file. It combines UI, AI, and Networking.
+The frontend is a single-page application (SPA) built for performance and responsiveness.
 
-### The AI Loop (`startMonitoring`)
-The `loop()` function runs continuously (using `requestAnimationFrame`).
-1.  **FaceMesh**: It sends the video frame to MediaPipe to find facial landmarks.
-    *   **Logic**: It checks the nose position relative to the eyes to determine if the student is looking at the screen (`onFaceResults`).
-2.  **CocoSSD**: It runs object detection periodically (randomly 5% of frames) to check for "cell phones".
-3.  **Audio Analysis**: Checks for high noise levels using the Web Audio API.
+### Centralized State Management
+- **AuthContext**: Manages login state, user roles, and JWT persistence.
+- **Hooks**:
+    - `useMediaStream`: Encapsulates camera and microphone logic.
+    - `useSocketSession`: Manages the Socket.IO connection and event listeners.
 
-### Connection Logic (`connectSocket`)
-*   It connects to the server via Socket.IO.
-*   It asks for the webcam stream instantly (`getUserMedia`).
-*   **WebRTC**: When a `teacher_offer` arrives, it creates an `RTCPeerConnection` to send the student's video to the teacher.
-
----
-
-## 4. Frontend: Teacher Dashboard (`teacher_dashboard.html`)
-
-The teacher's command center.
-
-### Real-time Updates
-*   It listens for `teacher_alert` events to pop up toast notifications (e.g., "Student X is looking away").
-*   It polls `/api/get_students` every 3 seconds to update the main table with the latest attention scores.
-
-### Video Grid
-*   The dashboard creates a "Video Card" for each student.
-*   It receives the video stream via WebRTC (`addVideoCard` function).
-*   It allows the teacher to "Kick" students or mute them.
+### The AI Pipeline (`StudentMonitor.jsx`)
+The student's browser performs heavy lifting using MediaPipe:
+1.  **Capture**: Local webcam stream is fed to the Face Mesh model.
+2.  **Analyze**: 
+    - **EAR (Eye Aspect Ratio)**: Detects drowsiness or closed eyes.
+    - **Head Pose**: Uses nose and eye landmarks to calculate **Pitch** and **Yaw** (detecting if the student is looking up, down, or sideways).
+    - **Iris Tracking**: Monitors pupil position to detect precise gaze direction.
+3.  **Emit**: An attention score (0-100%) and a status string (e.g., "Focused") are calculated and sent to the server every 2 seconds.
 
 ---
 
-## 5. User Flow Summary
+## 4. Real-time Communication Flow
 
-1.  **Login**: User logs in (`student_login.html`).
-2.  **Lobby**: Student enters a code in `student_dashboard.html`.
-3.  **Monitoring**:
-    *   Student lands on `student_monitor.html`.
-    *   Browser asks for Camera/Mic permissions.
-    *   AI models load.
-    *   Student joins the socket room.
-4.  **Teacher View**:
-    *   Teacher sees the student appear in `teacher_dashboard.html`.
-    *   Teacher's browser sends a "Video Offer".
-    *   Student's browser answers.
-    *   **Result**: Two-way video connection + Live AI stats.
+### 1. Joining a Class
+- Student scans a QR code or enters a Room Code.
+- Server validates the code and adds the student to a specific Socket.IO "room".
+- Teacher's dashboard updates in real-time to show the new student's card.
 
-## Study Tips regarding this code
-*   **Async/Await**: Notice how `async` is used heavily in `student_monitor.html`. Loading AI models and setting up cameras takes time, so we must wait for them before proceeding.
-*   **Socket.IO Rooms**: The app uses "rooms" effectively. A class equals a room. Messages sent to `room='CLASS123'` only go to people in that class.
-*   **Separation of Concerns**: `app.py` doesn't do any image processing. It just routes data. All the heavy AI work is done in the user's browser (Edge Computing). This makes the server very fast and cheap to run.
+### 2. WebRTC Video Streaming
+- Once joined, the server signals the **Teacher** to send a "Video Offer".
+- The **Student** receives the offer, creates an "Answer", and they exchange **ICE Candidates**.
+- Result: A peer-to-peer video stream is established without the video data ever passing through the server (reducing latency and server load).
+
+### 3. Ending a Class
+- When the teacher clicks "End Class", the server:
+    1.  Marks the `MeetingLink` as inactive.
+    2.  Calculates final averages for all students.
+    3.  Stores records in `SessionAnalytics`.
+    4.  Triggers a `class_ended` event to redirect all students.
+
+---
+
+## 5. Study Tips & Key Concepts
+
+*   **Edge AI**: Notice how no video data is sent to the server for processing. This protects privacy and makes the system highly scalable.
+*   **JWT Security**: The app uses short-lived access tokens and refresh tokens to ensure sessions are secure and can be recovered if the page is refreshed.
+*   **WebRTC Signaling**: Remember that WebRTC needs a middleman (Socket.IO) only to exchange credentials; once connected, the media is peer-to-peer.
+*   **Database Normalization**: Look at how `Alerts` and `AttentionLogs` are linked to `MonitoringSessions` rather than directly to `Students`. This allows us to track history across many different classes.
+
+---
+
+## ❓ Frequently Asked Questions (FAQ)
+
+### 1. Does the server process the student's video frames?
+**No.** All AI image processing (MediaPipe) happens directly in the student's browser. The server only receives the final **Attention Score** (a simple number). This ensures privacy and keeps the server fast.
+
+### 2. How does the system handle page refreshes?
+We use a combination of **JWT (JSON Web Tokens)** stored in `localStorage` and a React `AuthContext`. If a user refreshes, the app checks for a valid token and automatically restores their session and room connection.
+
+### 3. What is the difference between Socket.IO and WebRTC here?
+- **Socket.IO** is for "Small Data": Attention scores, hand-raises, and "handshake" messages (signaling).
+- **WebRTC** is for "Big Data": The actual video and audio streams between people.
+
+### 4. Why is the database count 7 models?
+We split data logically to stay organized:
+- 2 for users (**Teacher/Student**)
+- 1 for the room (**MeetingLink**)
+- 1 for the connection instance (**MonitoringSession**)
+- 2 for high-detail logs (**AttentionLog/Alert**)
+- 1 for the final summary (**SessionAnalytics**)
+
+---
+
+## 💻 Deep Code Details (What the lines do)
+Here are the specific code blocks an examiner might point to and ask: *"Explain what this line is doing."*
+
+### 1. `StudentMonitor.jsx` (The AI Engine)
+**Coordinates & Scaling:**
+```javascript
+const earL = Math.abs(landmarks[159].y - landmarks[145].y) / Math.max(0.01, Math.abs(landmarks[33].x - landmarks[133].x));
+```
+*   **Simple Explanation**: We take the height of the eye and divide it by the width. This **normalizes** the data so it works correctly regardless of whether the student is close to or far from the camera.
+
+**Head Pose (Pitch) Logic:**
+```javascript
+const pitch = (nose.y - midEyes.y) / dist - 0.4;
+```
+*   **Simple Explanation**: We measure where the nose is relative to the eyes. If the nose moves too far down, the "pitch" increases, and the system knows the student is looking down at their phone or desk.
+
+### 2. `server/app.py` (The Central Controller)
+**Socket.IO "join_room" Logic:**
+```python
+@socketio.on('join_room')
+def handle_join_room(data):
+    join_room(room)
+```
+*   **Simple Explanation**: This is like joining a private WhatsApp group. Data is only sent to the people in that specific class (Room), which keeps the information private and the network fast.
+
+**The "Final Snapshot" (End Class):**
+```python
+overall_avg = sum(l.attention_score for l in logs) / len(logs)
+```
+*   **Simple Explanation**: When the class ends, we don't just guess. We take every single score saved during the class, find the **mathematical average**, and save that as the final result for that student.
+
+### 3. `client/src/services/AuthContext.jsx` (Security)
+**JWT & Axios Interceptor:**
+```javascript
+if (token) config.headers.Authorization = `Bearer ${token}`;
+```
+*   **Simple Explanation**: This is like an "Admission Card." It automatically attaches the user's secret ID (Token) to every request they make, so the server always knows they have permission to be there.
+
+### 4. `server/models.py` (The Blueprint)
+**Relationships:**
+```python
+session_id = db.Column(db.Integer, db.ForeignKey('monitoring_sessions.id'))
+```
+*   **Simple Explanation**: This connects different tables together. It ensures that every "Attention Log" belongs to a specific "Monitoring Session," so we don't mix up data between different classes.
+
+### 5. `client/src/hooks/useMediaStream.js` (Webcam)
+**Media Constraints:**
+```javascript
+video: { frameRate: { max: 15 } }
+```
+*   **Simple Explanation**: We limit the camera to **15 frames per second**. 
+*   **Why?**: If we used 60 FPS, the AI would work so hard it would make the student's laptop too hot and lag the class. 15 FPS is the "sweet spot" for accuracy and performance.
+
+---
+
+## 🏆 Master Viva Phrases to use:
+*   "We implemented **Stateless JWT Authentication** for security—it means the server doesn't have to 'remember' every user, saving memory."
+*   "The logic uses **Geometric Landmark Analysis**—we calculate the physical distance between points on the face to detect focus."
+*   "The system follows a **Decentralized AI architecture**—the hard work is done by the student's computer, not our server."

@@ -12,6 +12,7 @@ erDiagram
     STUDENT ||--o{ ATTENTION_LOG : generates
     STUDENT ||--o{ ALERT : triggers
     MEETING_LINK ||--o{ MONITORING_SESSION : "associated with"
+    MEETING_LINK ||--o{ SESSION_ANALYTICS : generates
     MONITORING_SESSION ||--o{ ATTENTION_LOG : contains
     MONITORING_SESSION ||--o{ ALERT : records
 
@@ -106,7 +107,7 @@ Created when a student joins a class. It tracks their individual participation i
 - **room_code**: Links to the meeting link.
 - **student_id**: Links to the student.
 
-### 5. AttentionData (AttentionLog)
+### 5. AttentionLog
 High-frequency logs recording attention metrics during a session.
 - **attention_score**: Calculated percentage of attention.
 - **ear_value/mar_value**: Eye and Mouth Aspect Ratios from MediaPipe.

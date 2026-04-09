@@ -26,48 +26,73 @@ graph LR
 
 ---
 
-## Level 1: System-Wide Data Flow
-Level 1 breaks the system down into its primary functional processes and identifies the core data stores.
+## Level 1: Separated Data Flow
+
+### 1.1 Admin (Teacher) Data Flow
+This diagram illustrates the processes and data movement controlled by the Teacher/Admin.
 
 ```mermaid
 graph TD
     %% External Entities
     Teacher((Teacher))
+
+    %% Processes
+    P1[1.0 Admin Authentication]
+    P2[2.0 Classroom Management]
+    P4[4.0 Analytics & Reporting]
+
+    %% Data Stores
+    D1[(Teachers DB)]
+    D2[(MeetingLinks)]
+    D3[(MonitoringSessions)]
+    D5[(SessionAnalytics)]
+
+    %% Connections
+    Teacher -- "Credentials" --> P1
+    P1 <--> D1
+    P1 -- "JWT Token" --> Teacher
+
+    Teacher -- "Create/Start Class" --> P2
+    P2 <--> D2
+    P2 -- "Generated Room Code" --> Teacher
+    P2 --> D3
+
+    P4 <--> D5
+    P4 <--> D3
+    P4 -- "Live Dashboard / CSV Report" --> Teacher
+```
+
+---
+
+### 1.2 User (Student) Data Flow
+This diagram illustrates the processes and data movement relevant to the Student/User.
+
+```mermaid
+graph TD
+    %% External Entities
     Student((Student))
 
     %% Processes
     P1[1.0 User Authentication]
-    P2[2.0 Classroom Management]
+    P2[2.1 Join Session]
     P3[3.0 Real-time Attention Monitoring]
-    P4[4.0 Analytics & Reporting]
 
     %% Data Stores
-    D1[(Teachers/Students)]
+    D1[(Students DB)]
     D2[(MeetingLinks)]
-    D3[(MonitoringSessions)]
     D4[(AttentionLogs/Alerts)]
-    D5[(SessionAnalytics)]
 
     %% Connections
-    Teacher -- Credentials --> P1
-    Student -- Credentials --> P1
+    Student -- "Credentials" --> P1
     P1 <--> D1
-    P1 -- Auth Token --> Teacher
-    P1 -- Auth Token --> Student
+    P1 -- "JWT Token" --> Student
 
-    Teacher -- Class Creation/Start --> P2
-    P2 <--> D2
-    P2 -- Room Code --> Teacher
-    Student -- Room Code --> P2
-    P2 --> D3
+    Student -- "Room Code" --> P2
+    P2 -- "Verify Code" --> D2
+    P2 -- "Grant Access" --> Student
 
-    P3 -- Attention Metrics --> D4
-    P3 -- Real-time Stats --> P4
-    P4 <--> D5
-    P4 -- Dashboard Stats / CSV Report --> Teacher
-    
-    Student -- Raw Feed/Score --> P3
-    P3 -- Live Grid --> Teacher
+    Student -- "Raw AI Feed / Score" --> P3
+    P3 -- "Attention Metrics" --> D4
 ```
 
 ---
