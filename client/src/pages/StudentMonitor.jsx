@@ -104,6 +104,8 @@ const StudentMonitor = () => {
     const mainAreaRef = useRef(null);
     const eyesClosedStartRef = useRef(null);
     const lookingDownStartRef = useRef(null);
+    const prevNoseRef = useRef(null);
+    const faceLossStartRef = useRef(null);
 
 
     // Draggable PIP - Update initial position for mobile
@@ -160,137 +162,113 @@ const StudentMonitor = () => {
     }, [toggleAudio, videoEnabled, emit, roomCode, user?.id]);
 
     const onFaceResults = useCallback((results) => {
-        let score = 0;
-        let status = "Not Detected";
+        const now = Date.now();
         const hasFace = results.multiFaceLandmarks && results.multiFaceLandmarks[0];
 
-        if (hasFace) {
-            const landmarks = results.multiFaceLandmarks[0];
-            const now = Date.now();
-            score = 100;
-            status = "Focused";
-
-            // 1. EAR (Eye Aspect Ratio) 
-            const earL = Math.abs(landmarks[159].y - landmarks[145].y) / Math.max(0.01, Math.abs(landmarks[33].x - landmarks[133].x));
-            const earR = Math.abs(landmarks[386].y - landmarks[374].y) / Math.max(0.01, Math.abs(landmarks[362].x - landmarks[263].x));
-            const avgEAR = (earL + earR) / 2;
-
-            if (avgEAR < 0.15) {
-                if (!eyesClosedStartRef.current) eyesClosedStartRef.current = now;
-                const duration = now - eyesClosedStartRef.current;
-                if (duration > 1500) { score -= 80; status = "Sleepy"; }
-                else if (duration > 300) { score -= 40; status = "Distracted (Eyes)"; }
-            } else {
-                eyesClosedStartRef.current = null;
-            }
-
-            // 2. Head Pose (Yaw & Pitch)
-            const nose = landmarks[4];
-            const eyeL = landmarks[33];
-            const eyeR = landmarks[263];
-            const dist = Math.abs(eyeR.x - eyeL.x);
-            const midEyes = { x: (eyeL.x + eyeR.x) / 2, y: (eyeL.y + eyeR.y) / 2 };
+        // 1. Handle Face Loss (Gradual decay)
+        if (!hasFace) {
+            if (!faceLossStartRef.current) faceLossStartRef.current = now;
             
-            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
+            const lastScore = attentionHistoryRef.current.length > 0 ? attentionHistoryRef.current[attentionHistoryRef.current.length - 1] : 0;
+            const decayedScore = Math.max(0, lastScore - 8); // Decay by ~8% per 300ms
+            attentionHistoryRef.current.push(decayedScore);
+            if (attentionHistoryRef.current.length > 20) attentionHistoryRef.current.shift();
             
-            // Yaw (Sideways)
-            const yaw = (nose.x - midEyes.x) / dist;
-            const yawThreshold = isMobile ? 0.20 : 0.18;
-            if (Math.abs(yaw) > yawThreshold) {
-                score -= Math.abs(yaw) > 0.4 ? 60 : 40;
-                status = yaw > 0 ? "Looking Right" : "Looking Left";
-            }
-
-            // Pitch (Vertical)
-            const pitchThreshold = isMobile ? 0.25 : 0.15;
-            const pitchBaseline = isMobile ? 0.32 : 0.4;
-            const pitch = (nose.y - midEyes.y) / dist - pitchBaseline;
-
-            if (pitch > pitchThreshold) {
-                if (!lookingDownStartRef.current) lookingDownStartRef.current = now;
-                const downDuration = now - lookingDownStartRef.current;
-                if (downDuration > 2500) { score -= 70; status = "Looking Down (Long)"; }
-                else { score -= 30; status = "Looking Down"; }
-            } else if (pitch < -pitchThreshold) {
-                lookingDownStartRef.current = null;
-                score -= 45;
-                status = "Looking Up";
-            } else {
-                lookingDownStartRef.current = null;
-            }
+            const smoothed = Math.round(attentionHistoryRef.current.reduce((a, b) => a + b) / attentionHistoryRef.current.length);
+            setAttentionLevel(smoothed);
             
-            // 3. Eye Gaze (Iris/Pupil Tracking)
-            // Patient's RIGHT Eye (Camera Left): Outer 33, Inner 133, Iris 468
-            // Patient's LEFT Eye (Camera Right): Outer 263, Inner 362, Iris 473
-            if (landmarks.length > 473 && landmarks[468] && landmarks[473]) {
-                const irisR = landmarks[468]; // Right Iris
-                const irisL = landmarks[473]; // Left Iris
-                
-                // Horizontal Gaze
-                const eyeWidthR = Math.abs(landmarks[133].x - landmarks[33].x);
-                const eyeWidthL = Math.abs(landmarks[263].x - landmarks[362].x);
-
-                if (eyeWidthR > 0.005 && eyeWidthL > 0.005) {
-                    const gazeRatioR = (irisR.x - landmarks[33].x) / eyeWidthR;
-                    const gazeRatioL = (irisL.x - landmarks[362].x) / eyeWidthL;
-                    const avgGazeH = (gazeRatioR + gazeRatioL) / 2;
-
-                    // Vertical Gaze (Pupil up/down)
-                    // Right eye vertical range: 159 (top), 145 (bottom)
-                    // Left eye vertical range: 386 (top), 374 (bottom)
-                    const eyeHeightR = Math.abs(landmarks[145].y - landmarks[159].y);
-                    const eyeHeightL = Math.abs(landmarks[374].y - landmarks[386].y);
-                    const gazeRatioRV = (irisR.y - landmarks[159].y) / eyeHeightR;
-                    const gazeRatioLV = (irisL.y - landmarks[386].y) / eyeHeightL;
-                    const avgGazeV = (gazeRatioRV + gazeRatioLV) / 2;
-
-                    // Analysis
-                    const hDeviation = Math.abs(avgGazeH - 0.5);
-                    const vDeviation = Math.abs(avgGazeV - 0.5);
-                    
-                    const hThreshold = isMobile ? 0.22 : 0.15; // Slightly wider for mobile
-                    const vThreshold = 0.25;
-
-                    if (hDeviation > hThreshold || vDeviation > vThreshold) {
-                        score -= 50;
-                        if (status === "Focused") {
-                            if (hDeviation > hThreshold) status = avgGazeH > 0.5 ? "Looking Right" : "Looking Left";
-                            else status = avgGazeV > 0.5 ? "Looking Down" : "Looking Up";
-                        }
-                    }
-                }
+            if (now - lastEmitRef.current > 2000 && connected) {
+                emit('attention-update', {
+                    userId: user?.id, room: roomCode, attention: smoothed, status: "Not Detected"
+                });
+                lastEmitRef.current = now;
             }
-            
-            score = Math.max(0, score);
+            return;
         }
 
-        if (!videoEnabledRef.current) {
-            score = 0; // Attention is 0 when camera is off
-            status = "Camera Off";
-        } else if (score === 0 && status === "Focused") {
-            console.warn("Attention score is 0 - Face not detected or MediaPipe failing");
-            status = "Not Detected";
+        faceLossStartRef.current = null;
+        const landmarks = results.multiFaceLandmarks[0];
+
+        // --- STRICT WEIGHTED SCORING MODEL (30/30/30/10) ---
+        let faceScore = 30;     
+        let eyeScore = 0;       
+        let headScore = 0;      
+        let stabilityScore = 0; 
+        let status = "Focused";
+
+        // 2. Head Pose (30pt) - STRICT
+        const nose = landmarks[4];
+        const eyeLCenter = landmarks[468] || landmarks[133];
+        const eyeRCenter = landmarks[473] || landmarks[362];
+        const dist = Math.sqrt(Math.pow(eyeRCenter.x - eyeLCenter.x, 2) + Math.pow(eyeRCenter.y - eyeLCenter.y, 2));
+        const midEyes = { x: (eyeLCenter.x + eyeRCenter.x) / 2, y: (eyeLCenter.y + eyeRCenter.y) / 2 };
+        
+        const yaw = Math.abs((nose.x - midEyes.x) / dist);
+        const pitch = Math.abs((nose.y - midEyes.y) / dist - 0.35); 
+        
+        if (yaw < 0.22 && pitch < 0.22) {
+            headScore = 30 - (yaw * 70 + pitch * 70); 
+            headScore = Math.max(0, headScore);
+        } else {
+            headScore = 0;
+            status = yaw > 0.22 ? "Looking Sideways" : "Looking Away";
         }
 
-        attentionHistoryRef.current.push(score);
-        if (attentionHistoryRef.current.length > 5) attentionHistoryRef.current.shift();
+        // 3. Eye Gaze (30pt) - STRICT
+        if (landmarks.length > 473) {
+            const irisR = landmarks[468]; 
+            const irisL = landmarks[473];
+            const eyeWidthR = Math.max(0.005, Math.abs(landmarks[133].x - landmarks[33].x));
+            const eyeWidthL = Math.max(0.005, Math.abs(landmarks[263].x - landmarks[362].x));
+
+            const gazeH = ((irisR.x - landmarks[33].x) / eyeWidthR + (irisL.x - landmarks[362].x) / eyeWidthL) / 2;
+            const gazeV = ((irisR.y - landmarks[159].y) / Math.abs(landmarks[145].y - landmarks[159].y) + 
+                           (irisL.y - landmarks[386].y) / Math.abs(landmarks[374].y - landmarks[386].y)) / 2;
+            
+            const hDev = Math.abs(gazeH - 0.5);
+            const vDev = Math.abs(gazeV - 0.5);
+            
+            if (hDev < 0.15 && vDev < 0.2) {
+                eyeScore = 30 - (hDev * 100 + vDev * 100);
+            } else {
+                eyeScore = 0;
+                if (status === "Focused") status = "Eyes Away";
+            }
+        }
+
+        // 4. Stability (10pt)
+        if (prevNoseRef.current) {
+            const movement = Math.sqrt(Math.pow(nose.x - prevNoseRef.current.x, 2) + Math.pow(nose.y - prevNoseRef.current.y, 2));
+            if (movement < 0.005) stabilityScore = 10;
+            else stabilityScore = Math.max(0, 10 - movement * 2000);
+        } else stabilityScore = 10;
+        prevNoseRef.current = { x: nose.x, y: nose.y };
+
+        // 5. Final Calculation
+        let frameScore = faceScore + eyeScore + headScore + stabilityScore;
+        
+        const ear = (Math.abs(landmarks[159].y - landmarks[145].y) / Math.max(0.01, Math.abs(landmarks[33].x - landmarks[133].x)) + 
+                    Math.abs(landmarks[386].y - landmarks[374].y) / Math.max(0.01, Math.abs(landmarks[362].x - landmarks[263].x))) / 2;
+        if (ear < 0.16) {
+            if (!eyesClosedStartRef.current) eyesClosedStartRef.current = now;
+            if (now - eyesClosedStartRef.current > 1200) { frameScore *= 0.2; status = "Sleepy"; }
+        } else eyesClosedStartRef.current = null;
+
+        if (!videoEnabledRef.current) { frameScore = 0; status = "Camera Off"; }
+
+        // 6. Smoothing
+        attentionHistoryRef.current.push(frameScore);
+        if (attentionHistoryRef.current.length > 20) attentionHistoryRef.current.shift();
+        
         const smoothed = Math.round(attentionHistoryRef.current.reduce((a, b) => a + b) / attentionHistoryRef.current.length);
-
         setAttentionLevel(smoothed);
         setIsWarning(smoothed < 60);
 
-        const now = Date.now();
         if (now - lastEmitRef.current > 2000 && connected) {
-            console.log(`[ML] Emitting focus data: ${smoothed}% (${status})`);
             emit('attention-update', {
-                userId: user?.id,
-                student_id: user?.id,
-                room: roomCode,
-                attention: smoothed,
-                status: status,
-                student_name: user?.name,
-                audioEnabled: audioEnabled,
-                videoEnabled: videoEnabled
+                userId: user?.id, student_id: user?.id, room: roomCode,
+                attention: smoothed, status, student_name: user?.name,
+                audioEnabled, videoEnabled
             });
             lastEmitRef.current = now;
         }
@@ -429,6 +407,15 @@ const StudentMonitor = () => {
             }
         });
         on('teacher_joined', (data) => setStatusMessage(`Teacher ${data.teacher_name} Joined`));
+        on('teacher_reconnected', () => {
+            console.log("[WebRTC] Teacher reconnected. Resetting local PC to wait for fresh offer.");
+            setTeacherStream(null);
+            if (pcRef.current) {
+                pcRef.current.close();
+                pcRef.current = null;
+            }
+            tracksAddedRef.current = false;
+        });
         on('join_denied', (data) => {
             setStatusMessage(data.message || "Join Denied");
             setTimeout(() => navigate('/student-dashboard'), 3000);
@@ -540,7 +527,7 @@ const StudentMonitor = () => {
         on('screen_offer', async (data) => {
             console.log("Teacher screen offer received...");
             if (screenPcRef.current) screenPcRef.current.close();
-            
+
             const pc = new RTCPeerConnection({
                 iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
             });
@@ -587,8 +574,8 @@ const StudentMonitor = () => {
         });
         on('notification', (data) => setNotification(data));
 
-        return () => { 
-            if (pcRef.current) pcRef.current.close(); 
+        return () => {
+            if (pcRef.current) pcRef.current.close();
             if (screenPcRef.current) screenPcRef.current.close();
         };
     }, [connected, emit, navigate, on, roomCode, user?.id, user?.name, socket?.id]);
@@ -669,7 +656,7 @@ const StudentMonitor = () => {
                                     {handRaised && (
                                         <div className="bg-amber-400 text-slate-950 p-1.5 rounded-full shadow-lg border-2 border-white">
                                             <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                                                <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z"/>
+                                                <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z" />
                                             </svg>
                                         </div>
                                     )}
@@ -689,18 +676,18 @@ const StudentMonitor = () => {
                             <>
                                 {isScreenSharing && screenStream ? (
                                     <div className="w-full h-full flex flex-col">
-                                         <div className="flex-1 min-h-0 relative">
+                                        <div className="flex-1 min-h-0 relative">
                                             <video
                                                 ref={(el) => { if (el && screenStream) el.srcObject = screenStream; }}
                                                 autoPlay playsInline
                                                 className="w-full h-full object-contain bg-slate-900"
                                             />
                                             <div className="absolute top-3 left-3 bg-emerald-600/90 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg text-white border border-white/10 shadow-lg z-20">Teacher Screen</div>
-                                         </div>
-                                         {/* Move teacher camera to a small overlay if screen sharing */}
-                                         <div className="absolute bottom-4 right-4 w-32 sm:w-48 aspect-video rounded-xl overflow-hidden border-2 border-slate-700 shadow-2xl z-20">
+                                        </div>
+                                        {/* Move teacher camera to a small overlay if screen sharing */}
+                                        <div className="absolute bottom-4 right-4 w-32 sm:w-48 aspect-video rounded-xl overflow-hidden border-2 border-slate-700 shadow-2xl z-20">
                                             <TeacherVideo stream={teacherStream} />
-                                         </div>
+                                        </div>
                                     </div>
                                 ) : (
                                     <>

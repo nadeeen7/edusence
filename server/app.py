@@ -428,8 +428,11 @@ def handle_join_room(data):
     if role == 'teacher':
         join_room(room)
         classroom_sessions[room]["teacher_sid"] = request.sid
-        emit('room_joined', {'room': room, 'role': 'teacher', 'is_screen_sharing': classroom_sessions[room].get('is_screen_sharing', False)})
+        classroom_sessions[room]["is_screen_sharing"] = False
+        emit('room_joined', {'room': room, 'role': 'teacher', 'is_screen_sharing': False})
         emit('teacher_joined', {'teacher_id': user_id, 'teacher_name': user_name}, room=room, include_self=False)
+        # Notify students specifically that teacher reconnected (for WebRTC reset)
+        emit('teacher_reconnected', {'teacher_id': user_id}, room=room, include_self=False)
         recalculate_and_broadcast_stats(room, include_students=True)
     else:
         join_room(room)
@@ -439,7 +442,8 @@ def handle_join_room(data):
             "attention": 100,
             "connected": True,
             "status": "Focused",
-            "hand_raised": False
+            "hand_raised": False,
+            "sid": request.sid
         }
         emit('room_joined', {'room': room, 'role': 'student', 'is_screen_sharing': classroom_sessions[room].get('is_screen_sharing', False)})
         emit('user_joined', {'id': request.sid, 'student_id': user_id, 'student_name': user_name}, room=room, include_self=False)
@@ -693,7 +697,7 @@ def recalculate_and_broadcast_stats(room, include_students=False):
     }
     if include_students:
         payload['students'] = [
-            {'id': sid, 'name': s['name'], 'attention': s['attention'], 'status': s['status']} 
+            {'id': sid, 'name': s['name'], 'attention': s['attention'], 'status': s['status'], 'sid': s.get('sid')} 
             for sid, s in students.items() if s.get('connected')
         ]
     

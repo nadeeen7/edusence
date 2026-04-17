@@ -149,7 +149,7 @@ const FocusedStudentVideo = React.memo(({ student, stream }) => {
                         {student.hand_raised && (
                             <div className="bg-amber-400 text-slate-950 p-2 rounded-full shadow-lg border-2 border-white/30">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                                    <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z"/>
+                                    <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z" />
                                 </svg>
                             </div>
                         )}
@@ -215,7 +215,7 @@ const ThumbnailVideo = React.memo(({ student, stream, onClick, isTeacher, videoR
                         {student?.hand_raised && (
                             <div className="bg-amber-400 text-slate-950 p-0.5 rounded-full shadow-lg border border-white shrink-0">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-2.5 h-2.5">
-                                    <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z"/>
+                                    <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z" />
                                 </svg>
                             </div>
                         )}
@@ -282,7 +282,7 @@ const StudentVideoGrid = React.memo(({ student, stream, onClick }) => {
                 {student.hand_raised && (
                     <div className="bg-amber-400 text-slate-950 p-1.5 rounded-full shadow-lg border-2 border-white">
                         <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                            <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z"/>
+                            <path d="M12 2c.6 0 1 .4 1 1v7h1V4c0-.6.4-1 1-1s1 .4 1 1v6h1V6c0-.6.4-1 1-1s1 .4 1 1v9c0 2.2-1.8 4-4 4h-3c-2.8 0-5-2.2-5-5V8c0-.6.4-1 1-1s1 .4 1 1v6h1V3c0-.6.4-1 1-1z" />
                         </svg>
                     </div>
                 )}
@@ -598,7 +598,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
         setScreenStream(null);
         setIsScreenSharing(false);
         emit('screen_share_stop', { room: roomCode });
-        
+
         // Close all screen peer connections
         Object.values(screenPcRefs.current).forEach(pc => pc.close());
         screenPcRefs.current = {};
@@ -606,9 +606,9 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
 
     const startScreenShare = useCallback(async () => {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-            setNotification({ 
-                type: 'error', 
-                message: "Screen sharing is only supported on desktop browsers. Handheld devices do not support display capture." 
+            setNotification({
+                type: 'error',
+                message: "Screen sharing is only supported on desktop browsers. Handheld devices do not support display capture."
             });
             return;
         }
@@ -617,17 +617,17 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 video: { cursor: "always" },
                 audio: false
             });
-            
+
             screenStreamRef.current = stream;
             setScreenStream(stream);
             setIsScreenSharing(true);
-            
-            setNotification({ 
-                type: 'info', 
+
+            setNotification({
+                type: 'info',
                 message: "Screen Sharing Active! Tip: To avoid the 'Mirror Tunnel' effect, share a specific 'Window' or 'Tab' instead of 'Entire Screen'.",
                 duration: 8000
             });
-            
+
             emit('screen_share_start', { room: roomCode, teacher_name: user?.name });
 
             // Handle browser-level stop share
@@ -642,7 +642,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                     await initiateScreenCall(student.socketId, student.id, stream);
                 }
             });
-            
+
             // Re-broadcast to all rooms via server instead of individual emits here? 
             // Better to initiate calls to each socket.
             // Let's rely on individual signaling once the student receives screen_share_started.
@@ -801,6 +801,21 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                         } else {
                             next.push(newStudent);
                         }
+
+                        // WebRTC Auto-Reconnect Logic:
+                        // If teacher just refreshed, pcRefs will be empty. 
+                        // We must initiate a call to every student that is 'connected' to the socket room but not yet to WebRTC.
+                        if (!pcRefs.current[newStudent.id] && newStudent.sid) {
+                            console.log(`[Auto-Reconnect] Found existing student ${newStudent.name} (${newStudent.id}). Initiating call...`);
+                            if (teacherStreamRef.current) {
+                                initiateCall(newStudent.sid, newStudent.id, teacherStreamRef.current);
+                            } else {
+                                console.log(`[Auto-Reconnect] Teacher stream not ready for ${newStudent.name}. Queueing.`);
+                                if (!pendingCallsRef.current.some(p => p.studentId === newStudent.id)) {
+                                    pendingCallsRef.current.push({ socketId: newStudent.sid, studentId: newStudent.id });
+                                }
+                            }
+                        }
                     });
                     // Only keep students that are in the full sync payload, removing disconnected ghosts
                     return next.filter(s => data.students.some(ns => ns.id === s.id));
@@ -825,7 +840,7 @@ const LiveSession = ({ roomCode: propRoomCode, onExit }) => {
                 try {
                     console.log(`[WebRTC] Received student answer from ${data.student_id}`);
                     await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-                    
+
                     // Process any queued candidates
                     if (pc.pendingCandidates && pc.pendingCandidates.length > 0) {
                         console.log(`[WebRTC] Processing ${pc.pendingCandidates.length} queued candidates for ${data.student_id}`);
